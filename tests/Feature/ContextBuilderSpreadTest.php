@@ -46,6 +46,11 @@ it('includes spread_estimate_pips when SpreadEstimator returns a value', functio
         {
             return [];
         }
+
+        public function ingest(array $items): void
+        {
+            // no-op for tests
+        }
     };
 
     $mockEstimator = Mockery::mock(SpreadEstimator::class);

@@ -57,6 +57,13 @@ it('ensures ContextBuilder exposes only stats fields in news', function () {
         {
             return [];
         }
+
+        // ingest is optional for providers used only as a stub in tests,
+        // but it must be implemented to satisfy the contract.
+        public function ingest(array $items): void
+        {
+            // no-op for tests
+        }
     };
 
     $calendar = new \App\Application\Calendar\CalendarLookup($econProvider);

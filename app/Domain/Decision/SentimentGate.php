@@ -66,7 +66,7 @@ final class SentimentGate
         // If mode is contrarian and dominant side matches proposed action, block when above threshold
         if ($mode === 'contrarian') {
             if ($dominant === $proposedAction && $dominantPct >= $threshold) {
-                $reason = 'contrarian_crowd_' . ($dominant === 'buy' ? 'long' : 'short');
+                $reason = 'contrarian_crowd_'.($dominant === 'buy' ? 'long' : 'short');
                 $this->log('info', 'sentiment_gate_blocked', ['reason' => $reason, 'dominant_pct' => $dominantPct, 'proposed' => $proposedAction]);
 
                 return ['blocked' => true, 'reason' => $reason];
@@ -126,7 +126,7 @@ final class SentimentGate
 
         if ($mode === 'contrarian') {
             if ($dominant === $proposedAction && $dominantPct >= $threshold) {
-                $reason = 'contrarian_crowd_' . ($dominant === 'buy' ? 'long' : 'short');
+                $reason = 'contrarian_crowd_'.($dominant === 'buy' ? 'long' : 'short');
                 $this->log('info', 'sentiment_gate_blocked', ['reason' => $reason, 'dominant_pct' => $dominantPct, 'proposed' => $proposedAction]);
 
                 return ['blocked' => true, 'reason' => $reason];

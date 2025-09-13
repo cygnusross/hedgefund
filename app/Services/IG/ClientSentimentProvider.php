@@ -16,9 +16,15 @@ final class ClientSentimentProvider
      */
     public function fetch(string $marketId, bool $force = false): ?array
     {
-        $key = 'ig:sentiment:' . strtoupper($marketId);
+        $key = 'ig:sentiment:'.strtoupper($marketId);
 
-        if (! $force) {
+        if ($force) {
+            try {
+                $this->cache->forget($key);
+            } catch (\Throwable $e) {
+                // ignore cache errors
+            }
+        } else {
             $cached = $this->cache->get($key);
             if (is_array($cached)) {
                 return $cached;
@@ -28,7 +34,7 @@ final class ClientSentimentProvider
         try {
             $resp = $this->endpoint->get($marketId);
         } catch (\Throwable $e) {
-            Log::warning('ClientSentimentProvider: endpoint error: ' . $e->getMessage());
+            Log::warning('ClientSentimentProvider: endpoint error: '.$e->getMessage());
 
             return null;
         }
@@ -67,6 +73,9 @@ final class ClientSentimentProvider
         }
 
         $asOf = $resp['asOf'] ?? ($resp['as_of'] ?? ($resp['timestamp'] ?? null));
+        if (empty($asOf)) {
+            $asOf = now()->toIso8601String();
+        }
 
         if ($long === null && $short === null) {
             return null;
@@ -79,6 +88,7 @@ final class ClientSentimentProvider
         ];
 
         try {
+            // TTL in seconds
             $this->cache->put($key, $out, 60);
         } catch (\Throwable $e) {
             // ignore cache failures

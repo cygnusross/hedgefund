@@ -33,6 +33,11 @@ it('returns null until warm_up', function () {
         {
             return [];
         }
+
+        public function ingest(array $items): void
+        {
+            // no-op for tests
+        }
     };
 
     $builder = new ContextBuilder($updater, new NewsAggregator($news), new CalendarLookup($calendarProvider));
@@ -91,6 +96,11 @@ it('returns features news calendar and blackout true for near event', function (
                 'date_utc' => $when->format(DATE_ATOM),
                 'impact' => 'High',
             ]];
+        }
+
+        public function ingest(array $items): void
+        {
+            // no-op for tests
         }
     };
 
@@ -166,6 +176,11 @@ it('blackout false when event > 60min', function () {
         public function getCalendar(bool $force = false): array
         {
             return [];
+        }
+
+        public function ingest(array $items): void
+        {
+            // no-op for tests
         }
     };
 

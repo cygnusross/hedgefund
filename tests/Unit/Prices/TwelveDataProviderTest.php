@@ -30,3 +30,14 @@ it('returns array<Bar> oldest->newest with numeric fields', function () {
     expect(is_float($bars[0]->close))->toBeTrue();
     expect(is_float($bars[0]->volume))->toBeTrue();
 });
+
+it('throws RuntimeException when response missing values', function () {
+    // Response missing 'values' key
+    Http::fake([
+        'api.twelvedata.com/*' => Http::response(['meta' => ['symbol' => 'EURUSD']], 200),
+    ]);
+
+    $provider = new TwelveDataProvider('fake-key', 'https://api.twelvedata.com');
+
+    expect(fn () => $provider->getCandles('EURUSD', ['interval' => '5min']))->toThrow(RuntimeException::class);
+});

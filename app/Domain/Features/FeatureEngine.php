@@ -85,8 +85,40 @@ final class FeatureEngine
 
         // Stage 5: swing S/R on 5m
         $sr = Indicators::sr($slice5);
-        $supportLevels = $sr['support'] ?? [];
-        $resistanceLevels = $sr['resistance'] ?? [];
+        $rawSupports = $sr['support'] ?? [];
+        $rawResists = $sr['resistance'] ?? [];
+
+        // Determine last price from the slice (most recent close)
+        $lastBar = end($slice5);
+        $lastPrice = $lastBar ? $lastBar->close : null;
+
+        // Split and order supports/resistances relative to last price
+        $supports = [];
+        $resists = [];
+        if (is_numeric($lastPrice)) {
+            foreach ($rawSupports as $s) {
+                if ($s < $lastPrice) {
+                    $supports[] = $s;
+                }
+            }
+            foreach ($rawResists as $r) {
+                if ($r > $lastPrice) {
+                    $resists[] = $r;
+                }
+            }
+
+            // Sort supports descending (closest-first), resistances ascending (closest-first)
+            rsort($supports, SORT_NUMERIC);
+            sort($resists, SORT_NUMERIC);
+
+            // Limit to top 3 each
+            $supportLevels = array_slice($supports, 0, 3);
+            $resistanceLevels = array_slice($resists, 0, 3);
+        } else {
+            // Fallback to raw values if last price not available
+            $supportLevels = array_slice($rawSupports, 0, 3);
+            $resistanceLevels = array_slice($rawResists, 0, 3);
+        }
 
         return new FeatureSet(
             $ts,

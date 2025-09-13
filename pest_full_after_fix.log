@@ -1,0 +1,177 @@
+PHPUnit Started (PHPUnit 12.3.8 using PHP 8.4.12 (cli) on Darwin)
+Test Runner Configured
+Bootstrap Finished (/Users/rosswhitfield/Herd/hedgefund/vendor/autoload.php)
+Event Facade Sealed
+Test Suite Loaded (103 tests)
+Test Runner Started
+Test Suite Sorted
+Test Runner Execution Started (103 tests)
+Test Suite Started (/Users/rosswhitfield/Herd/hedgefund/phpunit.xml, 103 tests)
+Test Suite Started (Unit, 51 tests)
+Test Suite Started (P\Tests\Unit\CalendarLookupTest, 6 tests)
+Before First Test Method Called (P\Tests\Unit\CalendarLookupTest::setUpBeforeClass)
+Before First Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::setUpBeforeClass
+Test Preparation Started (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_matches_when_calendar_item_country_is_a_currency_code)
+Before Test Method Called (P\Tests\Unit\CalendarLookupTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::setUp
+Test Prepared (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_matches_when_calendar_item_country_is_a_currency_code)
+Post Condition Method Called (P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\CalendarLookupTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::tearDown
+Test Passed (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_matches_when_calendar_item_country_is_a_currency_code)
+Test Finished (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_matches_when_calendar_item_country_is_a_currency_code)
+Test Preparation Started (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_matches_when_calendar_item_provides_currencies_array_or_pair_like_tokens)
+Before Test Method Called (P\Tests\Unit\CalendarLookupTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::setUp
+Test Prepared (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_matches_when_calendar_item_provides_currencies_array_or_pair_like_tokens)
+Post Condition Method Called (P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\CalendarLookupTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::tearDown
+Test Passed (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_matches_when_calendar_item_provides_currencies_array_or_pair_like_tokens)
+Test Finished (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_matches_when_calendar_item_provides_currencies_array_or_pair_like_tokens)
+Test Preparation Started (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_prefers_Market_currencies_when_available)
+Before Test Method Called (P\Tests\Unit\CalendarLookupTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::setUp
+Test Prepared (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_prefers_Market_currencies_when_available)
+Post Condition Method Called (P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\CalendarLookupTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::tearDown
+Test Passed (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_prefers_Market_currencies_when_available)
+Test Finished (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_prefers_Market_currencies_when_available)
+Test Preparation Started (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_next__high_and_today__high_for_event_later_today)
+Before Test Method Called (P\Tests\Unit\CalendarLookupTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::setUp
+Test Prepared (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_next__high_and_today__high_for_event_later_today)
+Post Condition Method Called (P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\CalendarLookupTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::tearDown
+Test Passed (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_next__high_and_today__high_for_event_later_today)
+Test Finished (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_next__high_and_today__high_for_event_later_today)
+Test Preparation Started (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_next__high_when_event_is_tomorrow)
+Before Test Method Called (P\Tests\Unit\CalendarLookupTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::setUp
+Test Prepared (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_next__high_when_event_is_tomorrow)
+Post Condition Method Called (P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\CalendarLookupTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::tearDown
+Test Passed (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_next__high_when_event_is_tomorrow)
+Test Finished (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_next__high_when_event_is_tomorrow)
+Test Preparation Started (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_null_when_provider_has_no_events)
+Before Test Method Called (P\Tests\Unit\CalendarLookupTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::setUp
+Test Prepared (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_null_when_provider_has_no_events)
+Post Condition Method Called (P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\CalendarLookupTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\CalendarLookupTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::tearDown
+Test Passed (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_null_when_provider_has_no_events)
+Test Finished (P\Tests\Unit\CalendarLookupTest::__pest_evaluable_it_returns_null_when_provider_has_no_events)
+After Last Test Method Called (P\Tests\Unit\CalendarLookupTest::tearDownAfterClass)
+After Last Test Method Finished:
+- P\Tests\Unit\CalendarLookupTest::tearDownAfterClass
+Test Suite Finished (P\Tests\Unit\CalendarLookupTest, 6 tests)
+Test Suite Started (P\Tests\Unit\ContextBuilderAtrConversionTest, 2 tests)
+Before First Test Method Called (P\Tests\Unit\ContextBuilderAtrConversionTest::setUpBeforeClass)
+Before First Test Method Finished:
+- P\Tests\Unit\ContextBuilderAtrConversionTest::setUpBeforeClass
+Test Preparation Started (P\Tests\Unit\ContextBuilderAtrConversionTest::__pest_evaluable_it_converts_ATR_to_pips_for_EUR_USD)
+
+   PASS  Tests\Unit\CalendarLookupTest
+  ✓ it matches when calendar item country is a currency code                    0.17s  
+  ✓ it matches when calendar item provides currencies array or pair-like token… 0.01s  
+  ✓ it prefers Market currencies when available                                 0.01s  
+  ✓ it returns next_high and today_high for event later today                   0.01s  
+  ✓ it returns next_high when event is tomorrow                                 0.01s  
+  ✓ it returns null when provider has no events                                 0.01s  
+Before Test Method Called (P\Tests\Unit\ContextBuilderAtrConversionTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\ContextBuilderAtrConversionTest::setUp
+Test Prepared (P\Tests\Unit\ContextBuilderAtrConversionTest::__pest_evaluable_it_converts_ATR_to_pips_for_EUR_USD)
+Post Condition Method Called (P\Tests\Unit\ContextBuilderAtrConversionTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\ContextBuilderAtrConversionTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\ContextBuilderAtrConversionTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\ContextBuilderAtrConversionTest::tearDown
+Test Passed (P\Tests\Unit\ContextBuilderAtrConversionTest::__pest_evaluable_it_converts_ATR_to_pips_for_EUR_USD)
+Test Finished (P\Tests\Unit\ContextBuilderAtrConversionTest::__pest_evaluable_it_converts_ATR_to_pips_for_EUR_USD)
+Test Preparation Started (P\Tests\Unit\ContextBuilderAtrConversionTest::__pest_evaluable_it_converts_ATR_to_pips_for_USD_JPY)
+Before Test Method Called (P\Tests\Unit\ContextBuilderAtrConversionTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\ContextBuilderAtrConversionTest::setUp
+Test Prepared (P\Tests\Unit\ContextBuilderAtrConversionTest::__pest_evaluable_it_converts_ATR_to_pips_for_USD_JPY)
+Post Condition Method Called (P\Tests\Unit\ContextBuilderAtrConversionTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\ContextBuilderAtrConversionTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\ContextBuilderAtrConversionTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\ContextBuilderAtrConversionTest::tearDown
+Test Passed (P\Tests\Unit\ContextBuilderAtrConversionTest::__pest_evaluable_it_converts_ATR_to_pips_for_USD_JPY)
+Test Finished (P\Tests\Unit\ContextBuilderAtrConversionTest::__pest_evaluable_it_converts_ATR_to_pips_for_USD_JPY)
+After Last Test Method Called (P\Tests\Unit\ContextBuilderAtrConversionTest::tearDownAfterClass)
+After Last Test Method Finished:
+- P\Tests\Unit\ContextBuilderAtrConversionTest::tearDownAfterClass
+Test Suite Finished (P\Tests\Unit\ContextBuilderAtrConversionTest, 2 tests)
+Test Suite Started (P\Tests\Unit\Decision\DecisionEngineSafetyTest, 5 tests)
+Before First Test Method Called (P\Tests\Unit\Decision\DecisionEngineSafetyTest::setUpBeforeClass)
+Before First Test Method Finished:
+- P\Tests\Unit\Decision\DecisionEngineSafetyTest::setUpBeforeClass
+Test Preparation Started (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_blocks_when_market_status_not_allowed)
+
+   PASS  Tests\Unit\ContextBuilderAtrConversionTest
+  ✓ it converts ATR to pips for EUR/USD
+  ✓ it converts ATR to pips for USD/JPY
+Before Test Method Called (P\Tests\Unit\Decision\DecisionEngineSafetyTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\Decision\DecisionEngineSafetyTest::setUp
+Test Prepared (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_blocks_when_market_status_not_allowed)
+Post Condition Method Called (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\Decision\DecisionEngineSafetyTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\Decision\DecisionEngineSafetyTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\Decision\DecisionEngineSafetyTest::tearDown
+Test Passed (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_blocks_when_market_status_not_allowed)
+Test Finished (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_blocks_when_market_status_not_allowed)
+Test Preparation Started (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_allows_when_market_status_allowed)
+Before Test Method Called (P\Tests\Unit\Decision\DecisionEngineSafetyTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\Decision\DecisionEngineSafetyTest::setUp
+Test Prepared (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_allows_when_market_status_allowed)
+Post Condition Method Called (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__MarkTestIncompleteIfSnapshotHaveChanged)
+Post Condition Method Finished:
+- P\Tests\Unit\Decision\DecisionEngineSafetyTest::__MarkTestIncompleteIfSnapshotHaveChanged
+After Test Method Called (P\Tests\Unit\Decision\DecisionEngineSafetyTest::tearDown)
+After Test Method Finished:
+- P\Tests\Unit\Decision\DecisionEngineSafetyTest::tearDown
+Test Passed (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_allows_when_market_status_allowed)
+Test Finished (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_allows_when_market_status_allowed)
+Test Preparation Started (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_blocks_when_spread_required_but_missing)
+Before Test Method Called (P\Tests\Unit\Decision\DecisionEngineSafetyTest::setUp)
+Before Test Method Finished:
+- P\Tests\Unit\Decision\DecisionEngineSafetyTest::setUp
+Test Prepared (P\Tests\Unit\Decision\DecisionEngineSafetyTest::__pest_evaluable_it_blocks_when_spread_required_but_missing)

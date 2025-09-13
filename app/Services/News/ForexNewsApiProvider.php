@@ -28,7 +28,7 @@ class ForexNewsApiProvider implements NewsProvider
         if (! $base || ! $token) {
             Log::warning('ForexNewsApiProvider::fetchStat missing base_url or token in config');
 
-            return [];
+            return $this->neutralFor($pairDash, $dateKey);
         }
 
         $queryParams = [
@@ -50,6 +50,7 @@ class ForexNewsApiProvider implements NewsProvider
         } catch (\Throwable $e) {
             Log::warning('ForexNewsApiProvider::fetchStat HTTP request failed: '.$e->getMessage());
 
+            // On HTTP/network failure, return neutral stats
             return $this->neutralFor($pairDash, $dateKey);
         }
 
@@ -64,7 +65,7 @@ class ForexNewsApiProvider implements NewsProvider
         } catch (\Throwable $e) {
             Log::warning('ForexNewsApiProvider::fetchStat failed to parse JSON: '.$e->getMessage());
 
-            return [];
+            return $this->neutralFor($pairDash, $dateKey);
         }
 
         if (! is_array($json)) {
@@ -137,7 +138,9 @@ class ForexNewsApiProvider implements NewsProvider
 
     private function formatStats(string $pairDash, float $score, int $pos, int $neg, int $neu, string $dateKey): array
     {
-        $strength = ($score + 1.5) / 3.0;
+        // Map raw score (-1.5 .. +1.5) to a normalized strength in -1..+1 by dividing by 1.5
+        // This keeps the raw_score unaffected and exposes a linear strength metric.
+        $strength = $score / 1.5;
 
         return [
             'pair' => $pairDash,
@@ -160,9 +163,8 @@ class ForexNewsApiProvider implements NewsProvider
     public function fetchStat(string $pair, string $date = 'today', bool $fresh = false): array
     {
         $stats = $this->fetchStats($pair, $date, $fresh);
-
-        if (empty($stats) || ! is_array($stats)) {
-            return [];
+        if (! is_array($stats) || empty($stats)) {
+            $stats = $this->neutralFor(str_replace('/', '-', strtoupper($pair)), $date);
         }
 
         return [
@@ -173,5 +175,15 @@ class ForexNewsApiProvider implements NewsProvider
             'neu' => $stats['counts']['neu'] ?? 0,
             'score' => $stats['raw_score'] ?? 0.0,
         ];
+    }
+
+    /**
+     * Legacy article fetching interface kept as a stub. The provider is stats-first.
+     * Implement article fetching here if needed in future.
+     */
+    public function fetchArticles(string $pair, string $date = 'today', bool $noCache = true): array
+    {
+        // Not implemented: stats-only provider
+        return [];
     }
 }

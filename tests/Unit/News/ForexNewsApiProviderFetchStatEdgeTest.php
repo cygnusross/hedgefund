@@ -59,16 +59,22 @@ it('falls back to alternate total key names when present', function () {
     expect($stat['score'])->toBe(0.9);
 });
 
-it('returns empty array on HTTP error or invalid JSON', function () {
+it('returns neutral stats on HTTP error or invalid JSON', function () {
     // HTTP error
     Http::fakeSequence()->push('', 500);
 
     $prov = new ForexNewsApiProvider(['token' => 'fake', 'base_url' => 'https://api.example']);
     $stat = $prov->fetchStat('EUR/USD', '2025-09-12', true);
-    expect($stat)->toBeArray()->toBeEmpty();
+    expect($stat['pos'])->toBe(0);
+    expect($stat['neg'])->toBe(0);
+    expect($stat['neu'])->toBe(0);
+    expect($stat['score'])->toBe(0.0);
 
     // invalid JSON
     Http::fake(['*' => Http::response('not-json', 200)]);
     $stat2 = $prov->fetchStat('EUR/USD', '2025-09-12', true);
-    expect($stat2)->toBeArray()->toBeEmpty();
+    expect($stat2['pos'])->toBe(0);
+    expect($stat2['neg'])->toBe(0);
+    expect($stat2['neu'])->toBe(0);
+    expect($stat2['score'])->toBe(0.0);
 });

@@ -9,12 +9,27 @@ use App\Domain\Decision\DecisionContext;
 use App\Domain\Features\FeatureEngine;
 use App\Domain\FX\PipMath;
 use App\Domain\FX\SpreadEstimator;
+use App\Models\Market;
 use App\Services\IG\ClientSentimentProvider;
+use App\Services\IG\Endpoints\MarketsEndpoint;
+use Illuminate\Support\Facades\Cache;
 // Use fully-qualified DateTime classes to avoid non-compound use statement warnings
 use Illuminate\Support\Facades\Log;
 
 final class ContextBuilder
 {
+    /**
+     * Return true when the provided UTC datetime falls on Saturday or Sunday.
+     */
+    private function isWeekendUTC(\DateTimeImmutable $dt): bool
+    {
+        // Ensure timezone is UTC for the weekday check
+        $utc = $dt->setTimezone(new \DateTimeZone('UTC'));
+        $weekday = (int) $utc->format('w'); // 0 (Sun) - 6 (Sat)
+
+        return $weekday === 0 || $weekday === 6;
+    }
+
     // Make SpreadEstimator optional to preserve backward compatibility for tests that
     // construct ContextBuilder with only three arguments. When null, spread estimation
     // will be skipped.
@@ -126,15 +141,11 @@ final class ContextBuilder
         $atr5m = $featureSet->atr5m ?? null;
         $atr5mPips = is_numeric($atr5m) ? round(PipMath::toPips((float) $atr5m, $pair), 1) : null;
 
-        // Seconds until next 5-minute boundary
-        $nowTs = $nowUtc->getTimestamp();
-        $mod = $nowTs % 300;
-        $nextBarEta = $mod === 0 ? 0 : (300 - $mod);
-
+        // Seconds until next 5-minute boundary (computed later conditionally)
         $marketMeta = [
             'last_price' => $lastPrice,
             'atr5m_pips' => $atr5mPips,
-            'next_bar_eta_sec' => (int) $nextBarEta,
+            'next_bar_eta_sec' => null,
         ];
 
         // Live spread estimate from IG (may return null)
@@ -154,13 +165,118 @@ final class ContextBuilder
         $marketMeta['spread_estimate_pips'] = $spread;
         $marketMeta['status'] = $marketStatus;
 
+        // Fetch IG market status via MarketsEndpoint and cache for 30s.
+        // Resolve epic via Market model if possible, else attempt to derive from pair.
+        $igMarketStatus = null;
+        $igMarketQuoteAge = null;
+        try {
+            $market = Market::where('symbol', $pair)->first();
+            $epic = $market && $market->epic ? $market->epic : strtoupper(str_replace('/', '-', $pair));
+
+            $cacheKey = 'ig:marketStatus:'.$epic;
+            $marketIdCacheKey = 'ig:marketId:'.$epic;
+            $igMarketStatus = Cache::get($cacheKey);
+            // Attempt to read a previously cached IG marketId for this epic (24h TTL)
+            $cachedMarketId = Cache::get($marketIdCacheKey);
+            if ($igMarketStatus === null) {
+                $me = app(MarketsEndpoint::class);
+                $resp = $me->get($epic);
+                $status = $resp['snapshot']['marketStatus'] ?? null;
+                // compute quote_age_sec if updateTimestampUTC is present
+                $updateTs = $resp['snapshot']['updateTimestampUTC'] ?? $resp['snapshot']['updateTimestamp'] ?? null;
+                if (is_string($updateTs) && $updateTs !== '') {
+                    try {
+                        $updateDt = new \DateTimeImmutable($updateTs, new \DateTimeZone('UTC'));
+                        $igMarketQuoteAge = max(0, $nowUtc->getTimestamp() - $updateDt->getTimestamp());
+                    } catch (\Throwable $e) {
+                        // leave null on parse errors
+                        $igMarketQuoteAge = null;
+                    }
+                }
+                // If the markets endpoint provided a canonical marketId, cache it for reuse
+                $respMarketId = $resp['snapshot']['marketId'] ?? null;
+                if (is_string($respMarketId) && $respMarketId !== '') {
+                    $cachedMarketId = $respMarketId;
+                    try {
+                        Cache::put($marketIdCacheKey, $cachedMarketId, 24 * 60 * 60);
+                    } catch (\Throwable $e) {
+                        // non-fatal - proceed without caching
+                        Log::debug('ContextBuilder: failed to cache ig marketId', ['epic' => $epic, 'error' => $e->getMessage()]);
+                    }
+                }
+                if (is_string($status) && $status !== '') {
+                    $igMarketStatus = $status;
+                } else {
+                    $igMarketStatus = 'UNKNOWN';
+                }
+                Cache::put($cacheKey, $igMarketStatus, 30);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('ig_market_status_unavailable', ['pair' => $pair, 'error' => $e->getMessage()]);
+            $igMarketStatus = 'UNKNOWN';
+        }
+
+        // Prefer IG market status when it provides a meaningful value; otherwise fall back to spread estimator result or UNKNOWN
+        if ($igMarketStatus !== null && $igMarketStatus !== 'UNKNOWN') {
+            $marketMeta['status'] = $igMarketStatus;
+        } else {
+            // If IG didn't provide a meaningful status, prefer the estimator status when available
+            $marketMeta['status'] = $marketMeta['status'] ?? 'UNKNOWN';
+            // Weekend fallback: if it's weekend UTC and we have no meaningful IG status, mark as CLOSED
+            $nowUtcForWeekend = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+            if ($marketMeta['status'] === 'UNKNOWN' && $this->isWeekendUTC($nowUtcForWeekend)) {
+                $marketMeta['status'] = 'CLOSED';
+                // Ensure we don't provide ETA when market closed
+                $marketMeta['next_bar_eta_sec'] = null;
+            }
+        }
+
+        // Attach quote_age_sec if we computed it from the MarketsEndpoint response; otherwise null
+        $marketMeta['quote_age_sec'] = is_int($igMarketQuoteAge) ? $igMarketQuoteAge : null;
+
+        // Compute next_bar_eta_sec only when market status indicates tradeable/deal editing allowed
+        // and data age is fresh enough. Use rules.gates.max_data_age_sec (default 600) via AlphaRules.
+        $rules = app(\App\Domain\Rules\AlphaRules::class);
+        $maxDataAge = (int) $rules->getGate('max_data_age_sec', 600);
+        $maxQuoteAge = (int) $rules->getGate('max_quote_age_sec', 300);
+        $metaStale = $dataAgeSec !== null ? ($dataAgeSec > $maxDataAge) : true;
+
+        if (! in_array($marketMeta['status'], ['TRADEABLE', 'DEAL_NO_EDIT'], true)) {
+            $marketMeta['next_bar_eta_sec'] = null;
+        } else {
+            if ($dataAgeSec === null || $dataAgeSec > $maxDataAge) {
+                $marketMeta['next_bar_eta_sec'] = null;
+            } else {
+                $nowTs = $nowUtc->getTimestamp();
+                $mod = $nowTs % 300;
+                $nextBarEta = $mod === 0 ? 0 : (300 - $mod);
+                $marketMeta['next_bar_eta_sec'] = (int) $nextBarEta;
+            }
+        }
+
+        // Add market-level stale flag for callers to check if data is too old
+        $marketMeta['stale'] = $metaStale;
+
+        // Gate spread exposure by market status: if market is not TRADEABLE, hide spread and add reason
+        $tradeableStatuses = ['TRADEABLE', 'DEAL_NO_EDIT', 'OPEN'];
+        if (! in_array($marketMeta['status'], $tradeableStatuses, true)) {
+            $marketMeta['spread_estimate_pips'] = null;
+            $marketMeta['spread_reason'] = 'market_closed_or_unknown';
+        } else {
+            // Ensure spread_reason absent when tradeable
+            if (isset($marketMeta['spread_reason'])) {
+                unset($marketMeta['spread_reason']);
+            }
+        }
+
         // Attach client sentiment if available via provider (may be null)
         $sentiment = null;
         try {
             if ($this->sentimentProvider !== null) {
-                // attempt to derive marketId/epic from pair string if possible
-                $marketId = strtoupper(str_replace('/', '-', $pair));
-                $sentiment = $this->sentimentProvider->fetch($marketId);
+                // Prefer the IG marketId resolved from the markets endpoint (if cached),
+                // otherwise fall back to the market epic or a derived token from the pair.
+                $marketIdToUse = $cachedMarketId ?? ($market && $market->epic ? $market->epic : strtoupper(str_replace('/', '-', $pair)));
+                $sentiment = $this->sentimentProvider->fetch($marketIdToUse);
             }
         } catch (\Throwable $e) {
             Log::warning('client_sentiment_unavailable', ['pair' => $pair, 'error' => $e->getMessage()]);
@@ -196,6 +312,11 @@ final class ContextBuilder
         ];
         $payload['calendar'] = $cal;
         $payload['blackout'] = $blackout;
+        // Expose freshness thresholds used to compute stale/fresh logic
+        $payload['meta']['freshness'] = [
+            'max_data_age_sec' => $maxDataAge,
+            'max_quote_age_sec' => $maxQuoteAge,
+        ];
         // Expose market as a top-level block for cleaner schema
         $payload['market'] = $marketMeta;
 

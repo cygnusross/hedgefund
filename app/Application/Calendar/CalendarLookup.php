@@ -102,7 +102,8 @@ final class CalendarLookup
         if (is_array($providerEvents) && count($providerEvents) > 0) {
             // Provider returned raw array items (feed). Normalize and filter.
             foreach ($providerEvents as $item) {
-                $date = $item['date'] ?? ($item['datetime'] ?? null);
+                // Accept a few common date keys from providers: date, datetime, date_utc, when_utc
+                $date = $item['date'] ?? ($item['datetime'] ?? ($item['date_utc'] ?? ($item['when_utc'] ?? null)));
                 if (empty($date)) {
                     continue;
                 }
@@ -274,7 +275,7 @@ final class CalendarLookup
                 ];
             }
 
-            usort($matches, fn($a, $b) => $a['when'] <=> $b['when']);
+            usort($matches, fn ($a, $b) => $a['when'] <=> $b['when']);
 
             $earliest = $matches[0];
             $evt = $earliest['evt'];
@@ -346,7 +347,8 @@ final class CalendarLookup
             }
 
             foreach ($providerEvents as $item) {
-                $date = $item['date'] ?? ($item['datetime'] ?? null);
+                // Accept a few common date keys from providers: date, datetime, date_utc, when_utc
+                $date = $item['date'] ?? ($item['datetime'] ?? ($item['date_utc'] ?? ($item['when_utc'] ?? null)));
                 if (empty($date)) {
                     continue;
                 }
@@ -447,7 +449,7 @@ final class CalendarLookup
             ];
         }
 
-        usort($matches, fn($a, $b) => $a['when'] <=> $b['when']);
+        usort($matches, fn ($a, $b) => $a['when'] <=> $b['when']);
 
         $earliest = $matches[0];
         $evt = $earliest['evt'];
