@@ -28,11 +28,13 @@ if (isset($schedule)) {
         ->everyThirtyMinutes()
         ->timezone('Europe/London');
 
-    // News refresh schedule - weekdays every 30 minutes between 07:00 and 22:00 London time
-    $schedule->command('news:refresh EURUSD --days=1')
+    // Scheduled ingestion of news stats into DB.
+    $schedule->command('news:ingest')
         ->weekdays()
-        ->between('07:00', '22:00')
-        ->everyThirtyMinutes()
+        ->between('06:00', '22:00')
+        ->everyFifteenMinutes()
+        ->withoutOverlapping()
+        ->onOneServer()
         ->timezone('Europe/London');
 
     // Economic calendar refresh - weekdays every 20 minutes between 07:00 and 22:00 London time

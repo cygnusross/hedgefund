@@ -11,7 +11,7 @@ final class SentimentGate
 
     /**
      * Evaluate sentiment gate for a proposed action ('buy'|'sell') given sentiment payload.
-     * Returns null when sentiment is not blocking. Returns an array ['blocked' => true, 'reason' => string]
+     * Returns null when sentiment is not blocking. Returns an array ['blocked' => true, 'reasons' => array<string>]
      * when blocked (caller should set action to 'hold').
      */
     public function evaluate(?array $sentimentPayload, string $proposedAction): ?array
@@ -69,7 +69,7 @@ final class SentimentGate
                 $reason = 'contrarian_crowd_'.($dominant === 'buy' ? 'long' : 'short');
                 $this->log('info', 'sentiment_gate_blocked', ['reason' => $reason, 'dominant_pct' => $dominantPct, 'proposed' => $proposedAction]);
 
-                return ['blocked' => true, 'reason' => $reason];
+                return ['blocked' => true, 'reasons' => [$reason]];
             }
         }
 
@@ -129,7 +129,7 @@ final class SentimentGate
                 $reason = 'contrarian_crowd_'.($dominant === 'buy' ? 'long' : 'short');
                 $this->log('info', 'sentiment_gate_blocked', ['reason' => $reason, 'dominant_pct' => $dominantPct, 'proposed' => $proposedAction]);
 
-                return ['blocked' => true, 'reason' => $reason];
+                return ['blocked' => true, 'reasons' => [$reason]];
             }
         }
 

@@ -35,5 +35,6 @@ it('returns hold by default', function () {
     expect($res['action'])->toBe('hold');
     expect($res['confidence'])->toBe(0.0);
     // With safety gates in place, an empty context will lack market status and be held
-    expect($res['reason'])->toBe('status_closed');
+    expect(is_array($res['reasons']))->toBeTrue();
+    expect($res['reasons'])->toContain('status_closed');
 });

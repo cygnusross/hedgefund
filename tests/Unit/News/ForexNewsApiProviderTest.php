@@ -30,7 +30,7 @@ it('parses /stat responses and returns normalized stats', function () {
     Http::fake(['*' => Http::response($sample, 200)]);
 
     $prov = new ForexNewsApiProvider(['token' => 'fake']);
-    $stat = $prov->fetchStats('EUR/USD', '2025-09-12', true);
+    $stat = $prov->fetchStats('EUR/USD', '2025-09-12');
 
     expect($stat)->toBeArray()->toHaveKeys(['pair', 'raw_score', 'strength', 'counts', 'date']);
     expect($stat['counts']['pos'])->toBe(3);
@@ -45,7 +45,7 @@ it('returns neutral stats when totals absent', function () {
     Http::fake(['*' => Http::response($sample, 200)]);
 
     $prov = new ForexNewsApiProvider(['token' => 'fake']);
-    $stat = $prov->fetchStats('EUR/USD', '2025-09-12', true);
+    $stat = $prov->fetchStats('EUR/USD', '2025-09-12');
 
     expect($stat['counts']['pos'])->toBe(0);
     expect($stat['counts']['neg'])->toBe(0);
@@ -64,7 +64,7 @@ it('sends currencypair and date when calling fetchStat', function () {
     });
 
     $provider = new ForexNewsApiProvider(['token' => 'fake', 'base_url' => 'https://api.example']);
-    $provider->fetchStat('EUR/USD', '2025-09-12', false);
+    $provider->fetchStat('EUR/USD', '2025-09-12');
 });
 
 it('adds cache=false when fresh is true', function () {
@@ -76,5 +76,5 @@ it('adds cache=false when fresh is true', function () {
     });
 
     $provider = new ForexNewsApiProvider(['token' => 'fake', 'base_url' => 'https://api.example']);
-    $provider->fetchStat('EUR/USD', '2025-09-12', true);
+    $provider->fetchStat('EUR/USD', '2025-09-12');
 });

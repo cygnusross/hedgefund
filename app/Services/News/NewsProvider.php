@@ -20,5 +20,5 @@ interface NewsProvider
      *   score: float,
      * }|array Empty array on failure
      */
-    public function fetchStat(string $pair, string $date = 'today', bool $fresh = false): array;
+    public function fetchStat(string $pair, string $date = 'today'): array;
 }

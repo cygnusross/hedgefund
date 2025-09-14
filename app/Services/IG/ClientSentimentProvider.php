@@ -6,26 +6,31 @@ use App\Services\IG\Endpoints\ClientSentimentEndpoint;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\Log;
 
-final class ClientSentimentProvider
+class ClientSentimentProvider
 {
     public function __construct(protected ClientSentimentEndpoint $endpoint, protected CacheRepository $cache) {}
 
     /**
-     * Fetch client sentiment for the given marketId (epic).
-     * Returns ['long_pct'=>float,'short_pct'=>float,'as_of'=>string] or null on failure.
+     * Fetch client sentiment for the given marketId.
+     * Returns ['long_pct'=>float,'short_pct'=>float,'as_of'=>string] or null when values are missing.
      */
     public function fetch(string $marketId, bool $force = false): ?array
     {
-        $key = 'ig:sentiment:'.strtoupper($marketId);
+        $key = $this->cacheKey($marketId);
 
         if ($force) {
             try {
                 $this->cache->forget($key);
             } catch (\Throwable $e) {
-                // ignore cache errors
+                // ignore cache driver failures
             }
         } else {
-            $cached = $this->cache->get($key);
+            try {
+                $cached = $this->cache->get($key);
+            } catch (\Throwable $e) {
+                $cached = null;
+            }
+
             if (is_array($cached)) {
                 return $cached;
             }
@@ -43,57 +48,56 @@ final class ClientSentimentProvider
             return null;
         }
 
-        // Normalize expected shapes
+        // Primary expected keys per IG: longPositionPercentage, shortPositionPercentage
         $long = null;
         $short = null;
-        $asOf = null;
 
-        if (isset($resp['longPercent'])) {
+        if (isset($resp['longPositionPercentage'])) {
+            $long = (float) $resp['longPositionPercentage'];
+        }
+
+        if (isset($resp['shortPositionPercentage'])) {
+            $short = (float) $resp['shortPositionPercentage'];
+        }
+
+        // Accept some alternate keys if the API returns different shapes
+        if ($long === null && isset($resp['longPercent'])) {
             $long = (float) $resp['longPercent'];
         }
 
-        if (isset($resp['shortPercent'])) {
+        if ($short === null && isset($resp['shortPercent'])) {
             $short = (float) $resp['shortPercent'];
         }
 
-        if (isset($resp['long_pct'])) {
+        if ($long === null && isset($resp['long_pct'])) {
             $long = (float) $resp['long_pct'];
         }
 
-        if (isset($resp['short_pct'])) {
+        if ($short === null && isset($resp['short_pct'])) {
             $short = (float) $resp['short_pct'];
         }
 
-        if (isset($resp['long'])) {
-            $long = (float) $resp['long'];
-        }
-
-        if (isset($resp['short'])) {
-            $short = (float) $resp['short'];
-        }
-
-        $asOf = $resp['asOf'] ?? ($resp['as_of'] ?? ($resp['timestamp'] ?? null));
-        if (empty($asOf)) {
-            $asOf = now()->toIso8601String();
-        }
-
-        if ($long === null && $short === null) {
+        if ($long === null || $short === null) {
             return null;
         }
 
         $out = [
-            'long_pct' => $long ?? 0.0,
-            'short_pct' => $short ?? 0.0,
-            'as_of' => $asOf,
+            'long_pct' => $long,
+            'short_pct' => $short,
+            'as_of' => now()->toIso8601String(),
         ];
 
         try {
-            // TTL in seconds
             $this->cache->put($key, $out, 60);
         } catch (\Throwable $e) {
             // ignore cache failures
         }
 
         return $out;
+    }
+
+    protected function cacheKey(string $marketId): string
+    {
+        return 'ig:sentiment:{'.$marketId.'}';
     }
 }

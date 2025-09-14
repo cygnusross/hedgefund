@@ -14,7 +14,7 @@ function makeContext(array $overrides = []): mixed
         0.1,
         0.0,
         10.0,
-        5.0,
+        25.0,
         'flat',
         [],
         [],
@@ -27,7 +27,9 @@ function makeContext(array $overrides = []): mixed
     // Merge market/defaults and then rehydrate via DecisionContext is unnecessary for tests — but
     // we'll place additional keys into the array and then create a lightweight wrapper object to
     // pass into DecisionEngine via DecisionContext (Test uses toArray internally).
-    $arr['market'] = array_merge(['status' => $overrides['status'] ?? 'TRADEABLE', 'spread_estimate_pips' => $overrides['spread'] ?? 1.0], $overrides['market'] ?? []);
+    // Respect an explicit null spread override (use array_key_exists so null is preserved)
+    $spread = array_key_exists('spread', $overrides) ? $overrides['spread'] : 1.0;
+    $arr['market'] = array_merge(['status' => $overrides['status'] ?? 'TRADEABLE', 'spread_estimate_pips' => $spread], $overrides['market'] ?? []);
     $arr['blackout'] = $overrides['blackout'] ?? false;
     $arr['calendar'] = ['within_blackout' => $overrides['within_blackout'] ?? false];
 
@@ -64,7 +66,8 @@ it('blocks when market status not allowed', function () {
     $engine = new DecisionEngine;
     $res = $engine->decide($ctx, $rules);
     expect($res['action'])->toBe('hold');
-    expect($res['reason'])->toBe('status_closed');
+    expect(is_array($res['reasons']))->toBeTrue();
+    expect($res['reasons'])->toContain('status_closed');
 });
 
 it('allows when market status allowed', function () {
@@ -72,32 +75,13 @@ it('allows when market status allowed', function () {
     $rules = makeRules();
     $engine = new DecisionEngine;
     $res = $engine->decide($ctx, $rules);
-    expect($res['reason'])->toBe('ok');
+    expect(is_array($res['reasons']))->toBeTrue();
+    expect($res['reasons'])->toContain('ok');
 });
 
 it('blocks when spread required but missing', function () {
     $ctx = makeContext(['spread' => null]);
     $rules = makeRules();
-    // Force spread_required gate by creating a rules object that returns true for the gate
-    // Named test subclass to override getGate
-    if (! class_exists('\Tests\Unit\Decision\TestAlphaRulesSpread')) {
-        class TestAlphaRulesSpread extends AlphaRules
-        {
-            public function __construct()
-            {
-                parent::__construct(__DIR__.'/fixtures/empty_rules.yaml');
-            }
-
-            public function getGate(string $key, $default = null)
-            {
-                if ($key === 'spread_required') {
-                    return true;
-                }
-
-                return parent::getGate($key, $default);
-            }
-        }
-    }
     // Use a real AlphaRules instance and inject the gate via reflection to avoid
     // extending the final AlphaRules class.
     $rulesWith = new AlphaRules(__DIR__.'/fixtures/empty_rules.yaml');
@@ -108,7 +92,8 @@ it('blocks when spread required but missing', function () {
 
     $engine = new DecisionEngine;
     $res = $engine->decide($ctx, $rulesWith);
-    expect($res['reason'])->toBe('no_spread');
+    expect(is_array($res['reasons']))->toBeTrue();
+    expect($res['reasons'])->toContain('no_spread');
 });
 
 it('blocks when data is stale', function () {
@@ -116,7 +101,8 @@ it('blocks when data is stale', function () {
     $rules = makeRules();
     $engine = new DecisionEngine;
     $res = $engine->decide($ctx, $rules);
-    expect($res['reason'])->toBe('stale_data');
+    expect(is_array($res['reasons']))->toBeTrue();
+    expect($res['reasons'])->toContain('stale_data');
 });
 
 it('blocks on calendar blackout', function () {
@@ -124,5 +110,72 @@ it('blocks on calendar blackout', function () {
     $rules = makeRules();
     $engine = new DecisionEngine;
     $res = $engine->decide($ctx, $rules);
-    expect($res['reason'])->toBe('blackout');
+    expect(is_array($res['reasons']))->toBeTrue();
+    expect($res['reasons'])->toContain('blackout');
+});
+
+it('blocks when ADX below configured minimum', function () {
+    $ctx = makeContext();
+    // Put a low adx into features
+    $payload = $ctx->toArray();
+    $payload['features']['adx5m'] = 10; // below default 20
+
+    $ctxLowAdx = new class($payload)
+    {
+        private array $payload;
+
+        public function __construct(array $payload)
+        {
+            $this->payload = $payload;
+        }
+
+        public function toArray(): array
+        {
+            return $this->payload;
+        }
+    };
+
+    $rulesWith = new AlphaRules(__DIR__.'/fixtures/empty_rules.yaml');
+    $ref = new ReflectionClass($rulesWith);
+    $prop = $ref->getProperty('data');
+    $prop->setAccessible(true);
+    // Ensure adx_min exists (default 20) - we'll rely on default, but explicitly set gates to avoid surprises
+    $prop->setValue($rulesWith, ['gates' => ['adx_min' => 20]]);
+
+    $engine = new DecisionEngine;
+    $res = $engine->decide($ctxLowAdx, $rulesWith);
+    expect(is_array($res['reasons']))->toBeTrue();
+    expect($res['reasons'])->toContain('low_adx');
+});
+
+it('blocks when EMA Z is stretched beyond configured max', function () {
+    $ctx = makeContext();
+    $payload = $ctx->toArray();
+    $payload['features']['ema20_z'] = 1.5; // above default 1.0
+
+    $ctxStretched = new class($payload)
+    {
+        private array $payload;
+
+        public function __construct(array $payload)
+        {
+            $this->payload = $payload;
+        }
+
+        public function toArray(): array
+        {
+            return $this->payload;
+        }
+    };
+
+    $rulesWith = new AlphaRules(__DIR__.'/fixtures/empty_rules.yaml');
+    $ref = new ReflectionClass($rulesWith);
+    $prop = $ref->getProperty('data');
+    $prop->setAccessible(true);
+    $prop->setValue($rulesWith, ['gates' => ['z_abs_max' => 1.0]]);
+
+    $engine = new DecisionEngine;
+    $res = $engine->decide($ctxStretched, $rulesWith);
+    expect(is_array($res['reasons']))->toBeTrue();
+    expect($res['reasons'])->toContain('stretched_z');
 });

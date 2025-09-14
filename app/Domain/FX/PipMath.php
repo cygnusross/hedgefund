@@ -32,6 +32,14 @@ final class PipMath
     }
 
     /**
+     * Tick size is identical to pip size for FX pairs in this project.
+     */
+    public static function tickSize(string $pair): float
+    {
+        return self::pipSize($pair);
+    }
+
+    /**
      * Provide a conservative spread estimate in pips for a given pair.
      * These are simple defaults and can be overridden in future by config.
      */

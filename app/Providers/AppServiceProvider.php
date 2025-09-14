@@ -1,5 +1,16 @@
 <?php
 
+/*
+TASK: Bind the ClientSentimentProvider via the container so tests can mock it.
+
+- $this->app->bind(\App\Services\IG\ClientSentimentProvider::class, function ($app) {
+     return new \App\Services\IG\ClientSentimentProvider(
+        $app->make(\App\Services\IG\Endpoints\ClientSentimentEndpoint::class),
+        $app->make(\Illuminate\Contracts\Cache\Repository::class)
+     );
+  });
+  */
+
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
@@ -74,6 +85,19 @@ class AppServiceProvider extends ServiceProvider
             }
 
             return $rules;
+        });
+
+        // Bind ClientSentimentProvider for DI and easier test mocking
+        $this->app->bind(\App\Services\IG\ClientSentimentProvider::class, function ($app) {
+            return new \App\Services\IG\ClientSentimentProvider(
+                $app->make(\App\Services\IG\Endpoints\ClientSentimentEndpoint::class),
+                $app->make(\Illuminate\Contracts\Cache\Repository::class)
+            );
+        });
+
+        // Bind PositionLedgerContract to a NullPositionLedger by default so DecisionEngine can resolve it
+        $this->app->bind(\App\Domain\Execution\PositionLedgerContract::class, function ($app) {
+            return new \App\Domain\Execution\NullPositionLedger;
         });
     }
 

@@ -10,8 +10,10 @@ use App\Domain\Features\FeatureEngine;
 use App\Domain\FX\PipMath;
 use App\Domain\FX\SpreadEstimator;
 use App\Models\Market;
+use App\Models\NewsStat;
 use App\Services\IG\ClientSentimentProvider;
 use App\Services\IG\Endpoints\MarketsEndpoint;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\Cache;
 // Use fully-qualified DateTime classes to avoid non-compound use statement warnings
 use Illuminate\Support\Facades\Log;
@@ -32,15 +34,25 @@ final class ContextBuilder
 
     // Make SpreadEstimator optional to preserve backward compatibility for tests that
     // construct ContextBuilder with only three arguments. When null, spread estimation
-    // will be skipped.
-    public function __construct(public CandleUpdaterContract $updater, public NewsAggregator $news, public CalendarLookup $calendar, public ?SpreadEstimator $spreadEstimator = null, public ?ClientSentimentProvider $sentimentProvider = null) {}
+    // will be skipped. Also allow optional injection of IG Markets endpoint and a
+    // CacheRepository for easier testing; fall back to the container/facades when
+    // these are not provided to preserve backwards compatibility.
+    public function __construct(
+        public CandleUpdaterContract $updater,
+        public NewsAggregator $news,
+        public CalendarLookup $calendar,
+        public ?SpreadEstimator $spreadEstimator = null,
+        public ?ClientSentimentProvider $sentimentProvider = null,
+        public ?MarketsEndpoint $markets = null,
+        public ?CacheRepository $cacheRepo = null
+    ) {}
 
     /**
      * Build a DecisionContext for the given pair at timestamp $ts.
      * Returns null if not enough warm-up data.
      */
     // Add $forceSpread to allow callers (like CLI) to bypass estimator cache when requested.
-    public function build(string $pair, \DateTimeImmutable $ts, mixed $newsDateOrDays = null, bool $fresh = false, bool $forceSpread = false): ?array
+    public function build(string $pair, \DateTimeImmutable $ts, mixed $newsDateOrDays = null, bool $fresh = false, bool $forceSpread = false, array $opts = []): ?array
     {
         // Resolve bootstrap limits from config (safe keys)
         $limit5 = (int) (config('pricing.bootstrap_limit_5min') ?? config('pricing.bootstrap_limit') ?? 500);
@@ -79,17 +91,79 @@ final class ContextBuilder
         // Freshness: method param overrides config, but config can enable by default
         $fresh = $fresh || (bool) config('decision.news_fresh', false);
 
-        // Attach news summary (stats-only) and keep raw provenance fields for DecisionContext
-        $newsSummary = $this->news->summary($pair, $dateParam, $fresh);
-        if (! is_array($newsSummary)) {
-            $newsSummary = [];
+        // Attach news summary (stats-only) from persistent storage (NewsStat) instead of calling the API
+        $pair_norm = strtoupper(str_replace('/', '-', $pair));
+
+        try {
+            // Resolve 'today' to an explicit UTC date so we query the same date
+            // the caller requested via $dateParam. This prevents always falling
+            // back to the API when callers pass an explicit date or when tests
+            // expect lookup by arbitrary date.
+            $statDate = $dateParam === 'today' ? (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d') : $dateParam;
+
+            $statQuery = NewsStat::query()
+                ->where('pair_norm', $pair_norm);
+
+            // First try the exact requested date
+            $stat = (clone $statQuery)
+                ->where('stat_date', $statDate)
+                ->first();
+
+            // If no exact match, attempt to use the most recent persisted stat
+            // within the configured newsDays window to avoid calling the provider
+            // for a very recent/still-relevant stat (e.g., yesterday's aggregate).
+            if (! $stat) {
+                try {
+                    $startDt = new \DateTimeImmutable($statDate, new \DateTimeZone('UTC'));
+                    // Subtract newsDays days to form an inclusive lower bound. If newsDays
+                    // is 1, this will include the previous day as a fallback.
+                    $startDt = $startDt->sub(new \DateInterval('P'.max(1, $newsDays).'D'));
+                    $startDateStr = $startDt->format('Y-m-d');
+
+                    $recent = (clone $statQuery)
+                        ->where('stat_date', '>=', $startDateStr)
+                        ->orderByDesc('stat_date')
+                        ->first();
+
+                    if ($recent) {
+                        Log::info('news_stat_fallback_used', ['pair' => $pair, 'requested_date' => $statDate, 'used_date' => $recent->stat_date->toDateString()]);
+                        $stat = $recent;
+                    }
+                } catch (\Throwable $e) {
+                    // ignore fallback errors and proceed to provider call
+                }
+            }
+        } catch (\Throwable $e) {
+            // On any DB error, fall back to neutral values
+            Log::warning('news_stat_unavailable', ['pair' => $pair, 'error' => $e->getMessage()]);
+            $stat = null;
         }
 
-        // Debug: record what date param was and what provider returned (helps tests be deterministic)
-        Log::debug('ContextBuilder: news summary', [
-            'date_param' => $dateParam,
-            'news_summary' => $newsSummary,
-        ]);
+        if ($stat) {
+            $newsSummary = [
+                'direction' => ($stat->raw_score > 0 ? 'buy' : ($stat->raw_score < 0 ? 'sell' : 'neutral')),
+                'strength' => (float) $stat->strength,
+                'counts' => ['pos' => $stat->pos, 'neg' => $stat->neg, 'neu' => $stat->neu],
+                'raw_score' => (float) $stat->raw_score,
+                'date' => $stat->stat_date->toDateString(),
+            ];
+        } else {
+            // No persisted stat available; ask the NewsAggregator/provider for a live summary
+            try {
+                $newsSummary = $this->news->summary($pair, $dateParam, $fresh);
+            } catch (\Throwable $e) {
+                // Fall back to neutral on any provider error
+                $newsSummary = [
+                    'direction' => 'neutral',
+                    'strength' => 0.0,
+                    'counts' => ['pos' => 0, 'neg' => 0, 'neu' => 0],
+                    'raw_score' => 0.0,
+                    'date' => 'none',
+                ];
+            }
+        }
+
+        // record what date param was and what provider returned (helps tests be deterministic)
 
         // Attach calendar info
         $cal = $this->calendar->summary($pair, $ts);
@@ -116,12 +190,7 @@ final class ContextBuilder
             $nextMinutes = $cal['next_high']['minutes_to'];
         }
 
-        Log::debug('ContextBuilder: preview', [
-            'pair' => $pair,
-            'ts' => $logTs,
-            'next_high_impact_minutes' => $nextMinutes,
-            'blackout' => $blackout,
-        ]);
+        // preview metadata logged for debugging during development (removed in production)
 
         // Compute tails and freshness provenance
         $tail5 = count($bars5) ? end($bars5) : null;
@@ -169,17 +238,23 @@ final class ContextBuilder
         // Resolve epic via Market model if possible, else attempt to derive from pair.
         $igMarketStatus = null;
         $igMarketQuoteAge = null;
+        $cachedMarketId = null;
         try {
+            $market = null;
             $market = Market::where('symbol', $pair)->first();
             $epic = $market && $market->epic ? $market->epic : strtoupper(str_replace('/', '-', $pair));
 
             $cacheKey = 'ig:marketStatus:'.$epic;
             $marketIdCacheKey = 'ig:marketId:'.$epic;
-            $igMarketStatus = Cache::get($cacheKey);
+
+            // Prefer injected cache repository when available (easier to test); otherwise use the facade
+            $igMarketStatus = $this->cacheRepo ? $this->cacheRepo->get($cacheKey) : Cache::get($cacheKey);
             // Attempt to read a previously cached IG marketId for this epic (24h TTL)
-            $cachedMarketId = Cache::get($marketIdCacheKey);
+            $cachedMarketId = $this->cacheRepo ? $this->cacheRepo->get($marketIdCacheKey) : Cache::get($marketIdCacheKey);
+
             if ($igMarketStatus === null) {
-                $me = app(MarketsEndpoint::class);
+                // Prefer injected markets endpoint when provided for testability
+                $me = $this->markets ?? app(MarketsEndpoint::class);
                 $resp = $me->get($epic);
                 $status = $resp['snapshot']['marketStatus'] ?? null;
                 // compute quote_age_sec if updateTimestampUTC is present
@@ -198,10 +273,13 @@ final class ContextBuilder
                 if (is_string($respMarketId) && $respMarketId !== '') {
                     $cachedMarketId = $respMarketId;
                     try {
-                        Cache::put($marketIdCacheKey, $cachedMarketId, 24 * 60 * 60);
+                        if ($this->cacheRepo) {
+                            $this->cacheRepo->put($marketIdCacheKey, $cachedMarketId, 24 * 60 * 60);
+                        } else {
+                            Cache::put($marketIdCacheKey, $cachedMarketId, 24 * 60 * 60);
+                        }
                     } catch (\Throwable $e) {
                         // non-fatal - proceed without caching
-                        Log::debug('ContextBuilder: failed to cache ig marketId', ['epic' => $epic, 'error' => $e->getMessage()]);
                     }
                 }
                 if (is_string($status) && $status !== '') {
@@ -209,12 +287,24 @@ final class ContextBuilder
                 } else {
                     $igMarketStatus = 'UNKNOWN';
                 }
-                Cache::put($cacheKey, $igMarketStatus, 30);
+
+                try {
+                    if ($this->cacheRepo) {
+                        $this->cacheRepo->put($cacheKey, $igMarketStatus, 30);
+                    } else {
+                        Cache::put($cacheKey, $igMarketStatus, 30);
+                    }
+                } catch (\Throwable $e) {
+                    // ignore cache failures
+                }
             }
         } catch (\Throwable $e) {
             Log::warning('ig_market_status_unavailable', ['pair' => $pair, 'error' => $e->getMessage()]);
             $igMarketStatus = 'UNKNOWN';
         }
+
+        // Expose the canonical IG market id when we resolved one (may be null)
+        $marketMeta['market_id'] = is_string($cachedMarketId) ? $cachedMarketId : null;
 
         // Prefer IG market status when it provides a meaningful value; otherwise fall back to spread estimator result or UNKNOWN
         if ($igMarketStatus !== null && $igMarketStatus !== 'UNKNOWN') {
@@ -276,14 +366,17 @@ final class ContextBuilder
                 // Prefer the IG marketId resolved from the markets endpoint (if cached),
                 // otherwise fall back to the market epic or a derived token from the pair.
                 $marketIdToUse = $cachedMarketId ?? ($market && $market->epic ? $market->epic : strtoupper(str_replace('/', '-', $pair)));
-                $sentiment = $this->sentimentProvider->fetch($marketIdToUse);
+                $forceSentiment = (bool) ($opts['force_sentiment'] ?? false);
+                $sentiment = $this->sentimentProvider->fetch($marketIdToUse, $forceSentiment);
             }
         } catch (\Throwable $e) {
             Log::warning('client_sentiment_unavailable', ['pair' => $pair, 'error' => $e->getMessage()]);
             $sentiment = null;
         }
 
-        $marketMeta['sentiment'] = $sentiment;
+        if ($sentiment !== null) {
+            $marketMeta['sentiment'] = $sentiment;
+        }
 
         // Remove blackout duplication from calendar payload if provider added it
         if (is_array($cal) && isset($cal['blackout_minutes_high'])) {

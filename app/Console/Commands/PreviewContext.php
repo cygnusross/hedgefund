@@ -8,11 +8,11 @@ use Illuminate\Console\Command;
 
 final class PreviewContext extends Command
 {
-    protected $signature = 'context:preview {pair} {--now=} {--days=1} {--force-news} {--force-calendar} {--news-date=} {--news-fresh} {--force-spread}';
+    protected $signature = 'context:preview {pair} {--now=} {--days=1} {--force-news} {--force-calendar} {--force-sentiment} {--news-date=} {--news-fresh} {--force-spread}';
 
     protected $description = 'Preview the decision context JSON for a pair at a given time.';
 
-    public function __construct(protected ContextBuilder $contextBuilder)
+    public function __construct()
     {
         parent::__construct();
     }
@@ -43,8 +43,11 @@ final class PreviewContext extends Command
         $ts = $nowOpt ? new \DateTimeImmutable($nowOpt, new \DateTimeZone('UTC')) : new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
         $forceSpread = (bool) $this->option('force-spread');
+        $forceSentiment = (bool) $this->option('force-sentiment');
 
-        $ctx = $this->contextBuilder->build($pair, $ts, $newsDateOpt ?? $days, $newsFresh, $forceSpread);
+        $contextBuilder = app(ContextBuilder::class);
+
+        $ctx = $contextBuilder->build($pair, $ts, $newsDateOpt ?? $days, $newsFresh, $forceSpread, ['force_sentiment' => $forceSentiment]);
 
         if ($ctx === null) {
             $this->line('Not enough warm-up.');

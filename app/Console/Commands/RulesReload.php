@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use App\Domain\Rules\AlphaRules;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Log;
 
 final class RulesReload extends Command
 {
@@ -26,7 +25,7 @@ final class RulesReload extends Command
         $this->line('checksum: '.($meta['checksum'] ?? '<none>'));
         $this->line('loaded_at: '.($meta['loaded_at'] ?? '<none>'));
 
-        Log::debug('alpha_rules_loaded', $meta);
+        // alpha rules reloaded; metadata printed to console when requested
 
         if ($this->option('show')) {
             $this->line('gates.news_threshold: '.json_encode($rules->get('gates.news_threshold')));

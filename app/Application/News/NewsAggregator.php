@@ -32,7 +32,8 @@ final class NewsAggregator
         }
 
         try {
-            $s = $this->provider->fetchStat($pair, $date, $fresh);
+            // Provider.fetchStat signature no longer accepts a freshness boolean.
+            $s = $this->provider->fetchStat($pair, $date);
         } catch (\Throwable $e) {
             $s = [];
         }

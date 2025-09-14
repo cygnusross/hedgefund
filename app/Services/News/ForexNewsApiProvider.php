@@ -16,9 +16,9 @@ class ForexNewsApiProvider implements NewsProvider
      * Fetch aggregated sentiment statistics from the /stat endpoint.
      * Returns compact stats shape or neutral zeros on failure.
      *
-     * Signature: fetchStats(string $pair, string $date = 'today', bool $noCache = true): array
+     * Signature: fetchStats(string $pair, string $date = 'today'): array
      */
-    public function fetchStats(string $pair, string $date = 'today', bool $noCache = true): array
+    public function fetchStats(string $pair, string $date = 'today'): array
     {
         $pairDash = str_replace('/', '-', strtoupper($pair));
         $dateKey = $date; // caller may pass 'today' or 'last30days' or an explicit date
@@ -36,10 +36,9 @@ class ForexNewsApiProvider implements NewsProvider
             'date' => $dateKey,
             'page' => 1,
             'token' => $token,
+            // Always request upstream not to use its cache
+            'cache' => 'false',
         ];
-        if ($noCache) {
-            $queryParams['cache'] = 'false';
-        }
 
         $query = http_build_query($queryParams);
 
@@ -116,6 +115,56 @@ class ForexNewsApiProvider implements NewsProvider
         return $this->neutralFor($pairDash, $dateKey);
     }
 
+    /**
+     * Fetch a single page from the /stat endpoint and return decoded JSON.
+     * Returns [] on error.
+     */
+    public function fetchStatPage(string $pairDash, string $dateParam, int $page = 1): array
+    {
+        $base = rtrim($this->config['base_url'] ?? config('news.forexnewsapi.base_url', ''), '/');
+        $token = $this->config['token'] ?? config('news.forexnewsapi.token');
+        if (! $base || ! $token) {
+            Log::warning('ForexNewsApiProvider::fetchStatPage missing base_url or token in config');
+
+            return [];
+        }
+
+        $queryParams = [
+            'currencypair' => $pairDash,
+            'date' => $dateParam,
+            'page' => $page,
+            'token' => $token,
+            // Always request upstream not to use its cache
+            'cache' => 'false',
+        ];
+
+        $url = $base.'/stat?'.http_build_query($queryParams);
+
+        try {
+            $resp = Http::timeout(10)->retry(1, 100)->get($url);
+        } catch (\Throwable $e) {
+            Log::warning('ForexNewsApiProvider::fetchStatPage HTTP request failed: '.$e->getMessage());
+
+            return [];
+        }
+
+        if (! $resp->successful()) {
+            Log::warning(sprintf('ForexNewsApiProvider::fetchStatPage HTTP error %d when fetching %s', $resp->status(), $url));
+
+            return [];
+        }
+
+        try {
+            $json = $resp->json();
+        } catch (\Throwable $e) {
+            Log::warning('ForexNewsApiProvider::fetchStatPage failed to parse JSON: '.$e->getMessage());
+
+            return [];
+        }
+
+        return is_array($json) ? $json : [];
+    }
+
     // Article fetching removed — this provider is stats-only and implements fetchStat above.
 
     /**
@@ -160,9 +209,9 @@ class ForexNewsApiProvider implements NewsProvider
      * Backwards-compatible wrapper for the NewsProvider interface.
      * Returns the older shape: ['pair','date','pos','neg','neu','score']
      */
-    public function fetchStat(string $pair, string $date = 'today', bool $fresh = false): array
+    public function fetchStat(string $pair, string $date = 'today'): array
     {
-        $stats = $this->fetchStats($pair, $date, $fresh);
+        $stats = $this->fetchStats($pair, $date);
         if (! is_array($stats) || empty($stats)) {
             $stats = $this->neutralFor(str_replace('/', '-', strtoupper($pair)), $date);
         }
