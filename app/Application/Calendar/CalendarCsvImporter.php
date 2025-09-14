@@ -528,22 +528,21 @@ class CalendarCsvImporter
 
             foreach ($targets as $targetCurrency) {
                 // Build deterministic idempotency hash so re-imports don't duplicate the same event.
-                // Use mb_strtolower for title, strtoupper for currency, include normalized impact and UTC ISO datetime.
-                $eventIsoForHash = '';
+                // Use the same hash generation method as CalendarEvent::makeHash() for consistency
+                $eventTimeImmutable = null;
                 if ($dtUtc instanceof \Carbon\CarbonImmutable) {
-                    $eventIsoForHash = $dtUtc->toIso8601String();
+                    $eventTimeImmutable = new \DateTimeImmutable($dtUtc->toDateTimeString(), new \DateTimeZone('UTC'));
                 } elseif (! empty($eventTimeUtc)) {
-                    $eventIsoForHash = (string) $eventTimeUtc;
+                    try {
+                        $eventTimeImmutable = new \DateTimeImmutable($eventTimeUtc, new \DateTimeZone('UTC'));
+                    } catch (\Exception $e) {
+                        $eventTimeImmutable = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+                    }
+                } else {
+                    $eventTimeImmutable = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
                 }
 
-                $hashParts = [
-                    mb_strtolower((string) $title),
-                    strtoupper((string) ($targetCurrency ?? '')),
-                    (string) ($normalizedImpact ?? ''),
-                    $eventIsoForHash,
-                ];
-
-                $hash = hash('sha256', implode('|', $hashParts));
+                $hash = CalendarEvent::makeHash((string) $title, (string) $targetCurrency, $eventTimeImmutable);
 
                 $payload = [
                     'title' => $title,

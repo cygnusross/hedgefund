@@ -21,7 +21,7 @@ it('computes next_high and within_blackout from DB events', function () {
         'impact' => 'High',
         'event_time_utc' => $in30->format(DATE_ATOM),
         'source' => 'test',
-        'hash' => md5('soon'),
+        'hash' => CalendarEvent::makeHash('Soon High', 'USD', $in30),
     ]);
 
     CalendarEvent::create([
@@ -30,7 +30,7 @@ it('computes next_high and within_blackout from DB events', function () {
         'impact' => 'High',
         'event_time_utc' => $in120->format(DATE_ATOM),
         'source' => 'test',
-        'hash' => md5('later'),
+        'hash' => CalendarEvent::makeHash('Later High', 'USD', $in120),
     ]);
 
     $lookup = new CalendarLookup(app('App\Services\Economic\EconomicCalendarProvider'));

@@ -1,31 +1,27 @@
 <?php
 
-use App\Application\Calendar\CalendarCsvImporter;
 use App\Models\CalendarEvent;
 use App\Models\Market;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Storage;
+use Tests\Traits\CalendarCsvTestHelpers;
 
-uses(RefreshDatabase::class);
+uses(RefreshDatabase::class, CalendarCsvTestHelpers::class);
 
 it('parses Date/Event/Impact/Currency headers and uses --tz for non-offset dates', function () {
-    Storage::fake('local');
-    $disk = Storage::disk('local');
-
-    $csv = implode("\n", [
-        'Date,Event,Impact,Currency,Source',
-        '2025-09-07 05:15,Test Event,High,EUR,feed',
-    ]);
+    $this->setupCalendarCsvTest();
 
     // The header shape intentionally uses our alternate format; note the date value does not contain offset
-    $disk->put('calendar_csv/headershape.csv', $csv);
-    $path = $disk->path('calendar_csv');
+    $this->createCsvFile(
+        'headershape.csv',
+        ['Date', 'Event', 'Impact', 'Currency', 'Source'],
+        [['2025-09-07 05:15', 'Test Event', 'High', 'EUR', 'feed']]
+    );
 
-    $importer = app(CalendarCsvImporter::class);
+    $importer = $this->getCalendarCsvImporter();
     // New policy: CSV local datetimes are treated as UTC
-    $res = $importer->importDirectory($path, false, false, 'Medium');
+    $res = $importer->importDirectory($this->getCalendarCsvPath(), false, false, 'Medium');
 
     expect(CalendarEvent::count())->toBe(1);
 
@@ -41,21 +37,16 @@ it('parses Date/Event/Impact/Currency headers and uses --tz for non-offset dates
 });
 
 it('--min-impact filters out lower impact rows', function () {
-    Storage::fake('local');
-    $disk = Storage::disk('local');
+    $this->setupCalendarCsvTest();
 
-    $csv = implode("\n", [
-        'title,currency,impact,date,source',
-        'LowEvent,USD,Low,2025-10-01 09:00:00,feed',
-        'MedEvent,USD,Medium,2025-10-01 10:00:00,feed',
+    $this->createSimpleCalendarCsv('minimpact.csv', [
+        ['LowEvent', 'USD', 'Low', '2025-10-01 09:00:00', 'feed'],
+        ['MedEvent', 'USD', 'Medium', '2025-10-01 10:00:00', 'feed'],
     ]);
 
-    $disk->put('calendar_csv/minimpact.csv', $csv);
-    $path = $disk->path('calendar_csv');
-
     // Set min-impact to Medium -> LowEvent should be skipped
-    $importer = app(CalendarCsvImporter::class);
-    $res = $importer->importDirectory($path, false, false, 'Medium');
+    $importer = $this->getCalendarCsvImporter();
+    $res = $importer->importDirectory($this->getCalendarCsvPath(), false, false, 'Medium');
 
     $titles = CalendarEvent::pluck('title')->all();
     expect(in_array('LowEvent', $titles))->toBeFalse();
@@ -67,22 +58,16 @@ it('expands currency ALL into unique market currencies', function () {
     CalendarEvent::query()->delete();
     Market::query()->delete();
 
-    Market::create(['name' => 'EURUSD', 'symbol' => 'EUR/USD', 'epic' => 'EURUSD', 'currencies' => ['EUR', 'USD'], 'is_active' => 1]);
-    Market::create(['name' => 'GBPUSD', 'symbol' => 'GBP/USD', 'epic' => 'GBPUSD', 'currencies' => ['GBP', 'USD'], 'is_active' => 1]);
+    $this->createTestMarkets();
 
-    Storage::fake('local');
-    $disk = Storage::disk('local');
+    $this->setupCalendarCsvTest();
 
-    $csv = implode("\n", [
-        'title,currency,impact,date,source',
-        'AllEvent,ALL,Medium,2025-09-07T05:15:00-04:00,feed',
+    $this->createSimpleCalendarCsv('all.csv', [
+        ['AllEvent', 'ALL', 'Medium', '2025-09-07T05:15:00-04:00', 'feed'],
     ]);
 
-    $disk->put('calendar_csv/all.csv', $csv);
-    $path = $disk->path('calendar_csv');
-
-    $importer = app(CalendarCsvImporter::class);
-    $res = $importer->importDirectory($path, false, false, 'Medium');
+    $importer = $this->getCalendarCsvImporter();
+    $res = $importer->importDirectory($this->getCalendarCsvPath(), false, false, 'Medium');
 
     expect(CalendarEvent::count())->toBe(3);
 

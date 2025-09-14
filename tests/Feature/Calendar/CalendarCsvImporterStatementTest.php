@@ -1,30 +1,28 @@
 <?php
 
-use App\Application\Calendar\CalendarCsvImporter;
 use App\Models\CalendarEvent;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
+use Tests\Traits\CalendarCsvTestHelpers;
 
-uses(RefreshDatabase::class);
+uses(RefreshDatabase::class, CalendarCsvTestHelpers::class);
 
 it('parses statement_sample.csv dates using provided tz and stores UTC, normalizes None->Low, min-impact skips Low, and re-import idempotent', function () {
-    Storage::fake('local');
-    $disk = Storage::disk('local');
+    $this->setupCalendarCsvTest();
 
     // Copy fixture into fake storage path used by importer
     $fixture = base_path('tests/fixtures/calendar/statement_sample.csv');
     $contents = file_get_contents($fixture);
 
-    $disk->put('calendar_csv/statement_sample.csv', $contents);
-    $path = $disk->path('calendar_csv');
+    Storage::disk('local')->put('calendar_csv/statement_sample.csv', $contents);
 
-    $importer = app(CalendarCsvImporter::class);
+    $importer = $this->getCalendarCsvImporter();
 
     // First import with tz=Asia/Tokyo (local dates without offset) and minImpact Low
     // keepFiles=true so the file remains for a second import to validate idempotency
     // Under the new policy, CSV local datetimes are treated as UTC
-    $res1 = $importer->importDirectory($path, false, true, 'Low');
+    $res1 = $importer->importDirectory($this->getCalendarCsvPath(), false, true, 'Low');
 
     // Expect two parsed rows and two events created
     expect($res1['created'])->toBe(2);
@@ -51,13 +49,13 @@ it('parses statement_sample.csv dates using provided tz and stores UTC, normaliz
     if (Storage::disk('local')->exists('calendar_csv/processed/statement_sample.csv')) {
         Storage::disk('local')->copy('calendar_csv/processed/statement_sample.csv', 'calendar_csv/statement_sample.csv');
     }
-    $res2 = $importer->importDirectory($path, false, true, 'Low');
+    $res2 = $importer->importDirectory($this->getCalendarCsvPath(), false, true, 'Low');
     expect($res2['created'])->toBe(0);
     expect($res2['updated'])->toBeGreaterThanOrEqual(1);
 
     // Now import with min-impact=Medium -> Low events should be skipped
     CalendarEvent::query()->delete();
-    $res3 = $importer->importDirectory($path, false, true, 'Medium');
+    $res3 = $importer->importDirectory($this->getCalendarCsvPath(), false, true, 'Medium');
 
     // Only the Medium/High events should be created; our fixture has two Low events -> 0 created
     expect($res3['created'])->toBe(0);
