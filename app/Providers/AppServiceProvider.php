@@ -32,9 +32,7 @@ class AppServiceProvider extends ServiceProvider
                     config('pricing.twelvedata.base_url'),
                     (int) config('pricing.twelvedata.timeout', 8),
                 ),
-                'ig' => (class_exists('App\\Services\\Prices\\IgPriceProvider')
-                    ? $app->make('App\\Services\\Prices\\IgPriceProvider')
-                    : throw new \RuntimeException("Configured price provider [{$driver}] is not available.")),
+                'ig' => $app->make(\App\Services\Prices\IgPriceProvider::class),
                 default => throw new \RuntimeException("Unknown price provider [{$driver}] configured in config/pricing.php"),
             };
         });
@@ -49,6 +47,16 @@ class AppServiceProvider extends ServiceProvider
             };
         });
 
+        // Bind NewsService for dependency injection
+        $this->app->bind(\App\Application\News\NewsServiceInterface::class, \App\Application\News\NewsService::class);
+
+        // Bind IG Historical Prices Endpoint
+        $this->app->bind(\App\Services\IG\Endpoints\HistoricalPricesEndpoint::class, function ($app) {
+            return new \App\Services\IG\Endpoints\HistoricalPricesEndpoint(
+                $app->make(\App\Services\IG\Client::class)
+            );
+        });
+
         // Bind the EconomicCalendarProvider for fetching/caching economic calendar data
         $this->app->singleton(\App\Services\Economic\EconomicCalendarProvider::class, function ($app) {
             return new \App\Services\Economic\EconomicCalendarProvider;
@@ -57,13 +65,13 @@ class AppServiceProvider extends ServiceProvider
         // Bind the EconomicCalendarProviderContract to the concrete implementation
         $this->app->bind(
             \App\Services\Economic\EconomicCalendarProviderContract::class,
-            fn ($app) => $app->make(\App\Services\Economic\EconomicCalendarProvider::class)
+            fn($app) => $app->make(\App\Services\Economic\EconomicCalendarProvider::class)
         );
 
         // Bind CandleUpdaterContract to the IncrementalCandleUpdater so it can be injected by interface
         $this->app->bind(
             \App\Application\Candles\CandleUpdaterContract::class,
-            fn ($app) => $app->make(\App\Application\Candles\IncrementalCandleUpdater::class)
+            fn($app) => $app->make(\App\Application\Candles\IncrementalCandleUpdater::class)
         );
 
         // Bind CandleCache contract to adapter for DI

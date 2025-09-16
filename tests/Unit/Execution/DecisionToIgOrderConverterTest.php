@@ -9,9 +9,6 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(Tests\TestCase::class, RefreshDatabase::class);
 
 beforeEach(function () {
-    expect($result['level'])->toBeNumeric(); // Entry level in raw formatlass);
-
-beforeEach(function () {
     // Create test markets
     Market::create([
         'symbol' => 'EUR/USD',
@@ -46,7 +43,7 @@ it('converts EUR/USD buy decision to IG working order format', function () {
 
     $result = DecisionToIgOrderConverter::convert($decision, 'EUR/USD');
 
-        // Check basic structure
+    // Check basic structure
     expect($result['currencyCode'])->toBe('GBP');
     expect($result['direction'])->toBe('BUY');
     expect($result['epic'])->toBe('CS.D.EURUSD.TODAY.IP');
@@ -59,9 +56,9 @@ it('converts EUR/USD buy decision to IG working order format', function () {
     // Check that we have distance-based stops and limits (like successful manual orders)
     expect($result)->toHaveKey('stopDistance');
     expect($result)->toHaveKey('limitDistance');
-    expect($result['stopDistance'])->toBeNumeric();
-    expect($result['limitDistance'])->toBeNumeric();
-    expect($result['level'])->toBeNumeric(); // Entry level in raw format
+    expect($result['stopDistance'])->toBeInt(); // Raw points integer
+    expect($result['limitDistance'])->toBeInt(); // Raw points integer
+    expect($result['level'])->toBeInt(); // Entry level in raw integer format
     expect($result['level'])->toBeGreaterThan(10000); // Should be raw format like 11816
 });
 
@@ -82,9 +79,9 @@ it('converts EUR/USD sell decision to IG working order format', function () {
     // Check that we have distance-based stops and limits
     expect($result)->toHaveKey('stopDistance');
     expect($result)->toHaveKey('limitDistance');
-    expect($result['stopDistance'])->toBeNumeric();
-    expect($result['limitDistance'])->toBeNumeric();
-    expect($result['level'])->toBeNumeric(); // Entry level in raw format
+    expect($result['stopDistance'])->toBeInt(); // Raw points integer
+    expect($result['limitDistance'])->toBeInt(); // Raw points integer
+    expect($result['level'])->toBeInt(); // Entry level in raw integer format
 });
 
 it('converts USD/JPY decision with correct pip calculation', function () {
@@ -103,9 +100,9 @@ it('converts USD/JPY decision with correct pip calculation', function () {
     // Check that we have distance-based stops and limits
     expect($result)->toHaveKey('stopDistance');
     expect($result)->toHaveKey('limitDistance');
-    expect($result['stopDistance'])->toBeNumeric();
-    expect($result['limitDistance'])->toBeNumeric();
-    expect($result['level'])->toBeNumeric(); // Entry level in raw format
+    expect($result['stopDistance'])->toBeInt(); // Raw points integer
+    expect($result['limitDistance'])->toBeInt(); // Raw points integer
+    expect($result['level'])->toBeInt(); // Entry level in raw integer format
 });
 
 it('handles different pair formats correctly', function () {
@@ -135,7 +132,7 @@ it('throws exception for missing required fields', function () {
         // Missing sl, tp, size
     ];
 
-    expect(fn() => DecisionToIgOrderConverter::convert($incompleteDecision, 'EUR/USD'))
+    expect(fn () => DecisionToIgOrderConverter::convert($incompleteDecision, 'EUR/USD'))
         ->toThrow(InvalidArgumentException::class, 'Decision array missing required field: sl');
 });
 
@@ -148,7 +145,7 @@ it('throws exception for invalid action', function () {
         'size' => 26.31,
     ];
 
-    expect(fn() => DecisionToIgOrderConverter::convert($decision, 'EUR/USD'))
+    expect(fn () => DecisionToIgOrderConverter::convert($decision, 'EUR/USD'))
         ->toThrow(InvalidArgumentException::class, 'Invalid action: hold');
 });
 
@@ -161,7 +158,7 @@ it('throws exception for non-numeric values', function () {
         'size' => 26.31,
     ];
 
-    expect(fn() => DecisionToIgOrderConverter::convert($decision, 'EUR/USD'))
+    expect(fn () => DecisionToIgOrderConverter::convert($decision, 'EUR/USD'))
         ->toThrow(InvalidArgumentException::class, 'Field entry must be a positive numeric value');
 });
 
@@ -174,7 +171,7 @@ it('throws exception for inactive market', function () {
         'size' => 10.0,
     ];
 
-    expect(fn() => DecisionToIgOrderConverter::convert($decision, 'GBP/USD'))
+    expect(fn () => DecisionToIgOrderConverter::convert($decision, 'GBP/USD'))
         ->toThrow(InvalidArgumentException::class, 'No active market found for pair: GBP/USD');
 });
 
@@ -187,7 +184,7 @@ it('throws exception for unknown market', function () {
         'size' => 10.0,
     ];
 
-    expect(fn() => DecisionToIgOrderConverter::convert($decision, 'EUR/CHF'))
+    expect(fn () => DecisionToIgOrderConverter::convert($decision, 'EUR/CHF'))
         ->toThrow(InvalidArgumentException::class, 'No active market found for pair: EUR/CHF');
 });
 
@@ -205,7 +202,7 @@ it('calculates distances accurately with decimal precision', function () {
     // Check that distances are properly calculated
     expect($result)->toHaveKey('stopDistance');
     expect($result)->toHaveKey('limitDistance');
-    expect($result['stopDistance'])->toBeNumeric();
-    expect($result['limitDistance'])->toBeNumeric();
-    expect($result['level'])->toBeNumeric(); // Entry level in raw format
+    expect($result['stopDistance'])->toBeInt(); // Raw points integer
+    expect($result['limitDistance'])->toBeInt(); // Raw points integer
+    expect($result['level'])->toBeInt(); // Entry level in raw integer format
 });

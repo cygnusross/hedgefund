@@ -184,9 +184,13 @@ class SpreadEstimator
         $rawSpread = $offer - $bid;
         $actualSpread = $rawSpread;
 
-        // Detect Mini contracts by epic or instrument name
+        // Detect Mini contracts and Spread Betting contracts that use scaled pricing
         $instrumentName = $body['instrument']['name'] ?? '';
-        if (str_contains($epic, 'MINI') || str_contains(strtolower($instrumentName), 'mini')) {
+        $isScaledContract = str_contains($epic, 'MINI') ||
+            str_contains(strtolower($instrumentName), 'mini') ||
+            str_starts_with($epic, 'CS.D.'); // Spread betting contracts use raw format
+
+        if ($isScaledContract) {
             // Mini contracts use POINTS-based pricing that needs scaling
             $scalingFactor = $this->detectMiniContractScalingFactor($pair, $bid);
             if ($scalingFactor > 1) {

@@ -2,10 +2,12 @@
 
 use App\Application\Calendar\CalendarLookup;
 use App\Application\ContextBuilder;
-use App\Application\News\NewsAggregator;
 use App\Domain\FX\SpreadEstimator;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 // Use fully-qualified global DateTime classes to avoid non-compound use statement warnings
+
+uses(RefreshDatabase::class);
 
 it('includes spread_estimate_pips when SpreadEstimator returns a value', function () {
     $now = new \DateTimeImmutable('2025-01-01 00:00:00', new \DateTimeZone('UTC'));
@@ -57,7 +59,7 @@ it('includes spread_estimate_pips when SpreadEstimator returns a value', functio
     $mockEstimator->shouldReceive('estimatePipsForPair')->andReturn(0.9);
     $mockEstimator->shouldReceive('getMarketStatusForPair')->andReturn('OPEN');
 
-    $builder = new ContextBuilder($updater, new NewsAggregator($newsProvider), new CalendarLookup($calendarProvider), $mockEstimator);
+    $builder = new ContextBuilder($updater, new CalendarLookup($calendarProvider), $mockEstimator);
 
     $res = $builder->build('EUR/USD', $now);
 

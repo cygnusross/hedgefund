@@ -6,8 +6,8 @@ namespace App\Domain\Execution;
 
 use App\Domain\FX\PipMath;
 use App\Models\Market;
-use InvalidArgumentException;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 
 class DecisionToIgOrderConverter
 {

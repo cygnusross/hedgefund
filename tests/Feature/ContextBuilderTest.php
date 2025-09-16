@@ -2,10 +2,12 @@
 
 use App\Application\Calendar\CalendarLookup;
 use App\Application\ContextBuilder;
-use App\Application\News\NewsAggregator;
 use App\Domain\Market\Bar;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 // Use fully-qualified DateTime classes to avoid non-compound use statement warnings
+
+uses(RefreshDatabase::class);
 
 it('returns null until warm_up', function () {
     $now = new \DateTimeImmutable('2025-01-01 00:00:00', new \DateTimeZone('UTC'));
@@ -40,7 +42,7 @@ it('returns null until warm_up', function () {
         }
     };
 
-    $builder = new ContextBuilder($updater, new NewsAggregator($news), new CalendarLookup($calendarProvider));
+    $builder = new ContextBuilder($updater, new CalendarLookup($calendarProvider));
 
     $res = $builder->build('EUR/USD', $now, 'today');
     expect($res)->toBeNull();
@@ -104,7 +106,7 @@ it('returns features news calendar and blackout true for near event', function (
         }
     };
 
-    $builder = new ContextBuilder($updater, new NewsAggregator($newsProvider), new \App\Application\Calendar\CalendarLookup($calendarProvider));
+    $builder = new ContextBuilder($updater, new \App\Application\Calendar\CalendarLookup($calendarProvider));
 
     $res = $builder->build('EUR/USD', $now);
 
@@ -126,10 +128,10 @@ it('returns features news calendar and blackout true for near event', function (
     expect($res['meta']['pair_norm'])->toBe('EUR-USD');
     // calendar should not duplicate the blackout window
     expect(isset($res['calendar']['blackout_minutes_high']))->toBeFalse();
-    // News raw provenance
-    expect($res['news']['raw_score'])->toBe(0.33);
+    // News raw provenance - now uses cache-only approach, defaults to neutral when no cache
+    expect($res['news']['raw_score'])->toBe(0.0);
     $expectedDate = $now->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d');
-    expect(in_array($res['news']['date'], ['today', $expectedDate]))->toBeTrue();
+    expect($res['news']['date'])->toBe($expectedDate);
     // Market extras (promoted to top-level)
     expect($res)->toHaveKey('market');
     expect($res['market']['last_price'])->toBe($bars5[count($bars5) - 1]->close);
@@ -184,7 +186,7 @@ it('blackout false when event > 60min', function () {
         }
     };
 
-    $builder = new ContextBuilder($updater, new NewsAggregator($newsProvider), new \App\Application\Calendar\CalendarLookup($calendarProvider));
+    $builder = new ContextBuilder($updater, new \App\Application\Calendar\CalendarLookup($calendarProvider));
 
     $res = $builder->build('EUR/USD', $now);
     expect($res['blackout'])->toBeFalse();

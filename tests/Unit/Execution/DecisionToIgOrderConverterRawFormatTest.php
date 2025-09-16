@@ -8,17 +8,17 @@ test('validates raw format matches manual order structure', function () {
 
     // Simulate the exact values we got from tinker
     $mockPayload = [
-        "currencyCode" => "GBP",
-        "direction" => "BUY",
-        "epic" => "CS.D.EURUSD.TODAY.IP",
-        "expiry" => "DFB",
-        "guaranteedStop" => false,
-        "level" => 11812, // Integer like user's 11818
-        "size" => 0.5,
-        "stopDistance" => 24, // Integer points like user's 24
-        "limitDistance" => 24, // Integer points like user's 24
-        "timeInForce" => "GOOD_TILL_CANCELLED",
-        "type" => "STOP"
+        'currencyCode' => 'GBP',
+        'direction' => 'BUY',
+        'epic' => 'CS.D.EURUSD.TODAY.IP',
+        'expiry' => 'DFB',
+        'guaranteedStop' => false,
+        'level' => 11812, // Integer like user's 11818
+        'size' => 0.5,
+        'stopDistance' => 24, // Integer points like user's 24
+        'limitDistance' => 24, // Integer points like user's 24
+        'timeInForce' => 'GOOD_TILL_CANCELLED',
+        'type' => 'STOP',
     ];
 
     // Validate format matches successful manual order
@@ -38,7 +38,7 @@ test('validates raw format matches manual order structure', function () {
         'stopDistance',
         'limitDistance',
         'timeInForce',
-        'type'
+        'type',
     ]);
 
     expect($mockPayload['direction'])->toBe('BUY');
@@ -52,13 +52,13 @@ test('confirms format breakthrough based on manual order comparison', function (
     $userSuccessfulOrder = [
         'level' => 11818,    // Raw integer format (WORKS)
         'stopDistance' => 24,  // Raw points (WORKS)
-        'limitDistance' => 24  // Raw points (WORKS)
+        'limitDistance' => 24,  // Raw points (WORKS)
     ];
 
     $previousFailedFormat = [
         'level' => 1.1818,     // Decimal format (FAILED)
         'stopLevel' => 1.1750, // Absolute levels (FAILED)
-        'limitLevel' => 1.1880 // Absolute levels (FAILED)
+        'limitLevel' => 1.1880, // Absolute levels (FAILED)
     ];
 
     // Validate the successful format characteristics

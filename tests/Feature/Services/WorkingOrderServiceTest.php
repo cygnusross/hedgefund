@@ -131,7 +131,7 @@ test('creates working order with raw data successfully', function () {
     expect($order->deal_reference)->toBe($expectedDealRef);
     expect($order->direction)->toBe('SELL');
     expect($order->epic)->toBe('CS.D.GBPUSD.MINI.IP');
-    expect((float) $order->level)->toBe(1.2500);
+    expect((int) $order->level)->toBe(12500); // Raw IG format (integer)
 });
 
 test('validates required fields before creating order', function () {
@@ -140,7 +140,7 @@ test('validates required fields before creating order', function () {
         // Missing required fields
     ];
 
-    expect(fn() => $this->service->createWorkingOrder($invalidOrderData))
+    expect(fn () => $this->service->createWorkingOrder($invalidOrderData))
         ->toThrow(\InvalidArgumentException::class, 'Missing required field');
 });
 
@@ -156,7 +156,7 @@ test('validates mutual exclusivity constraints', function () {
         'limitDistance' => 15, // Cannot have both
     ];
 
-    expect(fn() => $this->service->createWorkingOrder($invalidOrderData))
+    expect(fn () => $this->service->createWorkingOrder($invalidOrderData))
         ->toThrow(\InvalidArgumentException::class, 'Set only one of limitLevel or limitDistance');
 });
 
@@ -169,7 +169,7 @@ test('gets pending orders', function () {
     $pendingOrders = $this->service->getPendingOrders();
 
     expect($pendingOrders)->toHaveCount(2);
-    expect($pendingOrders->every(fn($order) => $order->status === 'PENDING'))->toBeTrue();
+    expect($pendingOrders->every(fn ($order) => $order->status === 'PENDING'))->toBeTrue();
 });
 
 test('updates order status', function () {

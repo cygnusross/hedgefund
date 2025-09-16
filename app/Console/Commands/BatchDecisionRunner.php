@@ -6,7 +6,9 @@ use App\Application\ContextBuilder;
 use App\Domain\Decision\DecisionEngine;
 use App\Domain\Execution\DecisionToIgOrderConverter;
 use App\Models\Market;
+use App\Services\IG\WorkingOrderService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 class BatchDecisionRunner extends Command
 {
@@ -14,7 +16,7 @@ class BatchDecisionRunner extends Command
 
     protected $description = 'Analyze all markets and execute the best trading opportunity';
 
-    public function handle(): int
+    public function handle(WorkingOrderService $workingOrderService): int
     {
         $this->info('🚀 Starting batch decision analysis...');
 
@@ -39,7 +41,7 @@ class BatchDecisionRunner extends Command
         }
 
         // Step 5: Execute best trade
-        $this->executeBestTrade($tradeableDecisions[0]);
+        $this->executeBestTrade($tradeableDecisions[0], $workingOrderService);
 
         return 0;
     }
@@ -55,24 +57,35 @@ class BatchDecisionRunner extends Command
         foreach ($markets as $market) {
             $this->line("🔍 Analyzing {$market->symbol}...");
 
-            // Each market gets fresh API calls (TwelveData + IG)
-            $ctx = $builder->build(
-                $market->symbol,
-                $now,
-                null,
-                false, // calendar already refreshed by schedule
-                false, // sentiment not needed for decisions
-                [],
-                $this->option('account')
-            );
+            try {
+                // Each market gets fresh API calls (TwelveData + IG)
+                $ctx = $builder->build(
+                    $market->symbol,
+                    $now,
+                    null,
+                    false, // calendar already refreshed by schedule
+                    false, // sentiment not needed for decisions
+                    [],
+                    $this->option('account')
+                );
 
-            if ($ctx === null) {
-                $this->warn("⚠️ Skipping {$market->symbol} - could not build context");
+                if ($ctx === null) {
+                    $this->warn("⚠️ Skipping {$market->symbol} - could not build context");
+
+                    continue;
+                }
+
+                $decision = $engine->decide($ctx, $rules);
+            } catch (\Exception $e) {
+                $this->error("❌ Error analyzing {$market->symbol}: {$e->getMessage()}");
+                Log::error("Market analysis failed for {$market->symbol}", [
+                    'market' => $market->symbol,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
 
                 continue;
             }
-
-            $decision = $engine->decide($ctx, $rules);
 
             $decisions[] = [
                 'market' => $market->symbol,
@@ -119,41 +132,60 @@ class BatchDecisionRunner extends Command
         return $tradeable;
     }
 
-    private function executeBestTrade(array $bestTrade): void
+    private function executeBestTrade(array $bestTrade, WorkingOrderService $workingOrderService): void
     {
         $decision = $bestTrade['decision'];
         $market = $bestTrade['market'];
 
-        $this->info("🎯 BEST TRADE: {$market}");
-        $this->line("Action: {$decision['action']}");
-        $this->line("Confidence: {$decision['confidence']}");
-        $this->line("Size: {$decision['size']}");
-        $this->line("Entry: {$decision['entry']}");
-        $this->line("Stop: {$decision['sl']}");
-        $this->line("Target: {$decision['tp']}");
-
-        if ($decision['reasons'] ?? null) {
-            $this->line('Reasons: '.implode(', ', $decision['reasons']));
-        }
-
-        // Generate IG order
+        // Generate IG order first to show actual values that will be sent
         try {
             $igOrderData = DecisionToIgOrderConverter::convert($decision, $market);
 
-            $this->line('IG Order:');
+            $this->info("🎯 BEST TRADE: {$market}");
+            $this->line("Action: {$decision['action']}");
+            $this->line("Confidence: {$decision['confidence']}");
+            $this->line("Size: {$decision['size']}");
+            $this->line("Entry: {$igOrderData['level']} (raw format for IG)");
+            $this->line("Stop Distance: {$igOrderData['stopDistance']} points from entry");
+            $this->line("Limit Distance: {$igOrderData['limitDistance']} points from entry");
+
+            if ($decision['reasons'] ?? null) {
+                $this->line('Reasons: '.implode(', ', $decision['reasons']));
+            }
+
+            $this->line('IG Order Details:');
             $this->line("  Direction: {$igOrderData['direction']}");
-            $this->line("  Size: {$igOrderData['size']}");
-            $this->line("  Stop Distance: {$igOrderData['stopDistance']} pips");
-            $this->line("  Limit Distance: {$igOrderData['limitDistance']} pips");
+            $this->line("  Epic: {$igOrderData['epic']}");
+            $this->line("  Entry Level: {$igOrderData['level']} (raw)");
+            $this->line("  Stop Distance: {$igOrderData['stopDistance']} points");
+            $this->line("  Limit Distance: {$igOrderData['limitDistance']} points");
 
             if ($this->option('dry-run')) {
                 $this->info('🔍 DRY RUN - No trade executed');
             } else {
-                $this->info('🚀 TODO: Execute trade via IG API');
-                // TODO: Implement IG order submission
+                $this->info('🚀 Executing trade via IG API...');
+
+                // Execute the trade
+                $order = $workingOrderService->createWorkingOrderFromDecision($decision, $market);
+
+                if ($order) {
+                    $this->info('✅ Order placed successfully!');
+                    $this->line("Deal Reference: {$order->deal_reference}");
+                    $this->line("Status: {$order->status}");
+                } else {
+                    $this->error('❌ Failed to place order - no order returned');
+                }
             }
         } catch (\Exception $e) {
-            $this->error("❌ Failed to generate IG order: {$e->getMessage()}");
+            $this->error("❌ Failed to execute trade: {$e->getMessage()}");
+
+            // Log the full error for debugging
+            Log::error('Batch decision execution failed', [
+                'market' => $market,
+                'decision' => $decision,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
         }
     }
 }

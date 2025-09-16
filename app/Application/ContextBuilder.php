@@ -4,14 +4,14 @@ namespace App\Application;
 
 use App\Application\Calendar\CalendarLookup;
 use App\Application\Candles\CandleUpdaterContract;
-use App\Application\News\NewsAggregator;
+use App\Application\News\NewsCacheKeyStrategy;
+use App\Application\News\NewsServiceInterface;
 use App\Domain\Decision\DecisionContext;
 use App\Domain\Features\FeatureEngine;
 use App\Domain\FX\PipMath;
 use App\Domain\FX\SpreadEstimator;
 use App\Models\Account;
 use App\Models\Market;
-use App\Models\NewsStat;
 use App\Services\IG\ClientSentimentProvider;
 use App\Services\IG\Endpoints\MarketsEndpoint;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
@@ -40,12 +40,12 @@ final class ContextBuilder
     // these are not provided to preserve backwards compatibility.
     public function __construct(
         public CandleUpdaterContract $updater,
-        public NewsAggregator $news,
         public CalendarLookup $calendar,
         public ?SpreadEstimator $spreadEstimator = null,
         public ?ClientSentimentProvider $sentimentProvider = null,
         public ?MarketsEndpoint $markets = null,
-        public ?CacheRepository $cacheRepo = null
+        public ?CacheRepository $cacheRepo = null,
+        public ?NewsServiceInterface $newsService = null
     ) {}
 
     /**
@@ -64,12 +64,12 @@ final class ContextBuilder
         $bars30 = $this->updater->sync($pair, '30min', $limit30);
 
         // Ensure oldest->newest
-        usort($bars5, fn ($a, $b) => $a->ts <=> $b->ts);
-        usort($bars30, fn ($a, $b) => $a->ts <=> $b->ts);
+        usort($bars5, fn($a, $b) => $a->ts <=> $b->ts);
+        usort($bars30, fn($a, $b) => $a->ts <=> $b->ts);
 
         // Cut both to ts <= $ts (no look-ahead)
-        $bars5 = array_values(array_filter($bars5, fn ($b) => $b->ts <= $ts));
-        $bars30 = array_values(array_filter($bars30, fn ($b) => $b->ts <= $ts));
+        $bars5 = array_values(array_filter($bars5, fn($b) => $b->ts <= $ts));
+        $bars30 = array_values(array_filter($bars30, fn($b) => $b->ts <= $ts));
 
         $featureSet = FeatureEngine::buildAt($bars5, $bars30, $ts, $pair);
         if ($featureSet === null) {
@@ -90,78 +90,75 @@ final class ContextBuilder
             $dateParam = $tsDate < $todayDate ? $tsDate : 'today';
         }
 
-        // Freshness: method param overrides config, but config can enable by default
-        $fresh = $fresh || (bool) config('decision.news_fresh', false);
+        // Retrieve news data using NewsService if available, otherwise fallback to old logic
+        // Resolve date parameter to explicit date for cache lookup
+        $statDate = $dateParam === 'today' ? (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d') : $dateParam;
 
-        // Attach news summary (stats-only) from persistent storage (NewsStat) instead of calling the API
-        $pair_norm = strtoupper(str_replace('/', '-', $pair));
+        if ($this->newsService !== null) {
+            // Use the new NewsService
+            $newsData = $this->newsService->getNews($pair, $statDate);
 
-        try {
-            // Resolve 'today' to an explicit UTC date so we query the same date
-            // the caller requested via $dateParam. This prevents always falling
-            // back to the API when callers pass an explicit date or when tests
-            // expect lookup by arbitrary date.
-            $statDate = $dateParam === 'today' ? (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d') : $dateParam;
+            $rawScore = $newsData->rawScore;
+            $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
 
-            $statQuery = NewsStat::query()
-                ->where('pair_norm', $pair_norm);
-
-            // First try the exact requested date
-            $stat = (clone $statQuery)
-                ->where('stat_date', $statDate)
-                ->first();
-
-            // If no exact match, attempt to use the most recent persisted stat
-            // within the configured newsDays window to avoid calling the provider
-            // for a very recent/still-relevant stat (e.g., yesterday's aggregate).
-            if (! $stat) {
-                try {
-                    $startDt = new \DateTimeImmutable($statDate, new \DateTimeZone('UTC'));
-                    // Subtract newsDays days to form an inclusive lower bound. If newsDays
-                    // is 1, this will include the previous day as a fallback.
-                    $startDt = $startDt->sub(new \DateInterval('P'.max(1, $newsDays).'D'));
-                    $startDateStr = $startDt->format('Y-m-d');
-
-                    $recent = (clone $statQuery)
-                        ->where('stat_date', '>=', $startDateStr)
-                        ->orderByDesc('stat_date')
-                        ->first();
-
-                    if ($recent) {
-                        Log::info('news_stat_fallback_used', ['pair' => $pair, 'requested_date' => $statDate, 'used_date' => $recent->stat_date->toDateString()]);
-                        $stat = $recent;
-                    }
-                } catch (\Throwable $e) {
-                    // ignore fallback errors and proceed to provider call
-                }
-            }
-        } catch (\Throwable $e) {
-            // On any DB error, fall back to neutral values
-            Log::warning('news_stat_unavailable', ['pair' => $pair, 'error' => $e->getMessage()]);
-            $stat = null;
-        }
-
-        if ($stat) {
             $newsSummary = [
-                'direction' => ($stat->raw_score > 0 ? 'buy' : ($stat->raw_score < 0 ? 'sell' : 'neutral')),
-                'strength' => (float) $stat->strength,
-                'counts' => ['pos' => $stat->pos, 'neg' => $stat->neg, 'neu' => $stat->neu],
-                'raw_score' => (float) $stat->raw_score,
-                'date' => $stat->stat_date->toDateString(),
+                'direction' => $direction,
+                'strength' => $newsData->strength,
+                'counts' => $newsData->counts,
+                'raw_score' => $rawScore,
+                'date' => $newsData->date,
             ];
         } else {
-            // No persisted stat available; ask the NewsAggregator/provider for a live summary
-            try {
-                $newsSummary = $this->news->summary($pair, $dateParam, $fresh);
-            } catch (\Throwable $e) {
-                // Fall back to neutral on any provider error
+            // Fallback to old cache/database logic for backward compatibility
+            $cacheKey = NewsCacheKeyStrategy::statKey($pair, $statDate);
+            $newsData = Cache::get($cacheKey);
+
+            if ($newsData !== null && isset($newsData['raw_score'])) {
+                // Process cached API response data to match expected context format
+                $rawScore = (float) ($newsData['raw_score'] ?? 0.0);
+                $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
+
                 $newsSummary = [
-                    'direction' => 'neutral',
-                    'strength' => 0.0,
-                    'counts' => ['pos' => 0, 'neg' => 0, 'neu' => 0],
-                    'raw_score' => 0.0,
-                    'date' => 'none',
+                    'direction' => $direction,
+                    'strength' => (float) ($newsData['strength'] ?? 0.0),
+                    'counts' => $newsData['counts'] ?? ['pos' => 0, 'neg' => 0, 'neu' => 0],
+                    'raw_score' => $rawScore,
+                    'date' => $statDate,
                 ];
+            } else {
+                // Cache miss - try to rebuild from database
+                $pairNorm = strtoupper(str_replace(['/', ' '], '-', $pair));
+                $newsStat = \App\Models\NewsStat::where('pair_norm', $pairNorm)
+                    ->where('stat_date', $statDate)
+                    ->first();
+
+                if ($newsStat && $newsStat->payload) {
+                    // Rebuild cache from database payload
+                    $newsData = $newsStat->payload;
+                    $ttl = NewsCacheKeyStrategy::getTtl($statDate);
+                    Cache::put($cacheKey, $newsData, $ttl);
+
+                    // Process the data
+                    $rawScore = (float) ($newsData['raw_score'] ?? 0.0);
+                    $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
+
+                    $newsSummary = [
+                        'direction' => $direction,
+                        'strength' => (float) ($newsData['strength'] ?? 0.0),
+                        'counts' => $newsData['counts'] ?? ['pos' => 0, 'neg' => 0, 'neu' => 0],
+                        'raw_score' => $rawScore,
+                        'date' => $statDate,
+                    ];
+                } else {
+                    // No cached data or database record available - use neutral defaults
+                    $newsSummary = [
+                        'direction' => 'neutral',
+                        'strength' => 0.0,
+                        'counts' => ['pos' => 0, 'neg' => 0, 'neu' => 0],
+                        'raw_score' => 0.0,
+                        'date' => $statDate,
+                    ];
+                }
             }
         }
 
@@ -246,8 +243,8 @@ final class ContextBuilder
             $market = Market::where('symbol', $pair)->first();
             $epic = $market && $market->epic ? $market->epic : strtoupper(str_replace('/', '-', $pair));
 
-            $cacheKey = 'ig:marketStatus:'.$epic;
-            $marketIdCacheKey = 'ig:marketId:'.$epic;
+            $cacheKey = 'ig:marketStatus:' . $epic;
+            $marketIdCacheKey = 'ig:marketId:' . $epic;
 
             // Prefer injected cache repository when available (easier to test); otherwise use the facade
             $igMarketStatus = $this->cacheRepo ? $this->cacheRepo->get($cacheKey) : Cache::get($cacheKey);

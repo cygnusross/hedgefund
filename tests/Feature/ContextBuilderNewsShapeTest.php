@@ -5,8 +5,11 @@ use App\Application\Candles\CandleUpdaterContract;
 use App\Application\ContextBuilder;
 use App\Application\News\NewsAggregator;
 use App\Domain\Market\Bar;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 // Use fully-qualified DateTime classes to avoid non-compound use statement warnings
+
+uses(RefreshDatabase::class);
 
 it('ensures ContextBuilder exposes only stats fields in news', function () {
     // Fake CandleUpdater that returns enough bars for FeatureEngine
@@ -68,7 +71,7 @@ it('ensures ContextBuilder exposes only stats fields in news', function () {
 
     $calendar = new \App\Application\Calendar\CalendarLookup($econProvider);
 
-    $builder = new ContextBuilder($candleUpdater, $newsAgg, $calendar);
+    $builder = new ContextBuilder($candleUpdater, $calendar);
     $ts = new \DateTimeImmutable('2025-09-12T12:00:00+00:00');
 
     $payload = $builder->build('EUR/USD', $ts);

@@ -35,12 +35,12 @@ class Order extends Model
         'force_open' => 'boolean',
         'guaranteed_stop' => 'boolean',
         'good_till_date' => 'datetime',
-        'level' => 'decimal:5',
-        'limit_distance' => 'decimal:2',
-        'limit_level' => 'decimal:5',
+        'level' => 'integer', // Raw format (11818)
+        'limit_distance' => 'integer', // Raw points (24)
+        'limit_level' => 'integer', // Raw format when used
         'size' => 'decimal:8',
-        'stop_distance' => 'decimal:2',
-        'stop_level' => 'decimal:5',
+        'stop_distance' => 'integer', // Raw points (24)
+        'stop_level' => 'integer', // Raw format when used
         'open_cost' => 'decimal:2',
         'close_cost' => 'decimal:2',
     ];
