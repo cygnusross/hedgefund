@@ -84,3 +84,40 @@ it('creates a session and caches tokens', function () {
         expect($client->getCachedXSecurityToken())->toBe('fake-x-token');
     }
 });
+
+it('switches account using PUT request', function () {
+    // Seed cache with tokens
+    $username = config('services.ig.username') ?? 'default';
+    Cache::put('ig_session:'.$username.':CST', 'seed-cst', now()->addHours(12));
+    Cache::put('ig_session:'.$username.':X-SECURITY-TOKEN', 'seed-x', now()->addHours(12));
+
+    $config = config('services.ig', []);
+    $demoActive = data_get($config, 'demo.active', true);
+    $expectedBase = $demoActive
+        ? (rtrim(data_get($config, 'demo.base_url', 'https://demo-api.ig.com/gateway/deal'), '/'))
+        : (rtrim(data_get($config, 'base_url', 'https://api.ig.com/gateway/deal'), '/'));
+
+    Http::fake(function ($request) use ($expectedBase) {
+        expect(str_starts_with($request->url(), $expectedBase.'/session'))->toBeTrue();
+        expect($request->method())->toBe('PUT');
+
+        // Verify the request body
+        $body = json_decode((string) $request->body(), true) ?? [];
+        expect($body['accountId'])->toBe('ABC123');
+        expect($body['defaultAccount'])->toBe(true);
+
+        return Http::response([
+            'dealingEnabled' => true,
+            'hasActiveDemoAccounts' => true,
+            'hasActiveLiveAccounts' => true,
+            'trailingStopsEnabled' => true,
+        ], 200);
+    });
+
+    $endpoint = app(SessionEndpoint::class);
+    $result = $endpoint->switchAccount('ABC123', true);
+
+    expect($result)->toBeArray();
+    expect($result['dealingEnabled'])->toBe(true);
+    expect($result['trailingStopsEnabled'])->toBe(true);
+});

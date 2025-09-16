@@ -9,6 +9,7 @@ use App\Domain\Decision\DecisionContext;
 use App\Domain\Features\FeatureEngine;
 use App\Domain\FX\PipMath;
 use App\Domain\FX\SpreadEstimator;
+use App\Models\Account;
 use App\Models\Market;
 use App\Models\NewsStat;
 use App\Services\IG\ClientSentimentProvider;
@@ -52,7 +53,8 @@ final class ContextBuilder
      * Returns null if not enough warm-up data.
      */
     // Add $forceSpread to allow callers (like CLI) to bypass estimator cache when requested.
-    public function build(string $pair, \DateTimeImmutable $ts, mixed $newsDateOrDays = null, bool $fresh = false, bool $forceSpread = false, array $opts = []): ?array
+    // Add $accountName to allow selecting which account/sleeve to use for position sizing
+    public function build(string $pair, \DateTimeImmutable $ts, mixed $newsDateOrDays = null, bool $fresh = false, bool $forceSpread = false, array $opts = [], ?string $accountName = null): ?array
     {
         // Resolve bootstrap limits from config (safe keys)
         $limit5 = (int) (config('pricing.bootstrap_limit_5min') ?? config('pricing.bootstrap_limit') ?? 500);
@@ -267,9 +269,16 @@ final class ContextBuilder
                         // leave null on parse errors
                         $igMarketQuoteAge = null;
                     }
+                } else {
+                    // Fallback: use delayTime if available (represents data delay in seconds)
+                    $delayTime = $resp['snapshot']['delayTime'] ?? null;
+                    if (is_numeric($delayTime) && $delayTime >= 0) {
+                        $igMarketQuoteAge = (int) $delayTime;
+                    }
                 }
-                // If the markets endpoint provided a canonical marketId, cache it for reuse
-                $respMarketId = $resp['snapshot']['marketId'] ?? null;
+
+                // Get marketId from the correct location (instrument.marketId, not snapshot.marketId)
+                $respMarketId = $resp['instrument']['marketId'] ?? null;
                 if (is_string($respMarketId) && $respMarketId !== '') {
                     $cachedMarketId = $respMarketId;
                     try {
@@ -383,6 +392,29 @@ final class ContextBuilder
             unset($cal['blackout_minutes_high']);
         }
 
+        // Select account for position sizing
+        $account = null;
+        if ($accountName !== null) {
+            $account = Account::where('name', $accountName)->where('is_active', true)->first();
+        }
+
+        // Fallback to default active trading account if no specific account requested
+        if ($account === null) {
+            $account = Account::active()->trading()->first();
+        }
+
+        // If still no account found, log warning and use hardcoded fallback
+        $sleeveBalance = 10000.0; // default fallback
+        if ($account !== null) {
+            $sleeveBalance = (float) $account->calculateAvailableBalance();
+        } else {
+            Log::warning('No active trading account found, using hardcoded balance', [
+                'pair' => $pair,
+                'requested_account' => $accountName,
+                'fallback_balance' => $sleeveBalance,
+            ]);
+        }
+
         // Create DecisionContext and pass meta via constructor (non-breaking addition)
         $ctx = new DecisionContext($pair, $ts, $featureSet, [
             'schema_version' => '1.0.0',
@@ -391,6 +423,9 @@ final class ContextBuilder
             'bars_5m' => $bars5meta,
             'bars_30m' => $bars30meta,
             'calendar_blackout_window_min' => $blkMin,
+            'sleeve_balance' => $sleeveBalance,
+            'account_name' => $account?->name,
+            'account_id' => $account?->id,
         ]);
 
         // Build payload by merging ctx->toArray() with news/calendar/blackout

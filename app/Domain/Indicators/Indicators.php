@@ -417,4 +417,448 @@ final class Indicators
         // most recent first already due to scanning direction
         return ['support' => array_slice($supports, 0, 3), 'resistance' => array_slice($resistances, 0, 3)];
     }
+
+    /**
+     * Relative Strength Index (RSI) using Wilder's smoothing method.
+     *
+     * @param  Bar[]  $bars  oldest -> newest
+     * @param  int  $period  Period for RSI calculation (typically 14)
+     * @return float|null RSI value between 0-100, or null if insufficient data
+     */
+    public static function rsi(array $bars, int $period = 14): ?float
+    {
+        $count = count($bars);
+        if ($count < $period + 1) {
+            return null;
+        }
+
+        $gains = [];
+        $losses = [];
+
+        // Calculate price changes
+        for ($i = 1; $i < $count; $i++) {
+            $change = $bars[$i]->close - $bars[$i - 1]->close;
+            $gains[] = $change > 0 ? $change : 0.0;
+            $losses[] = $change < 0 ? abs($change) : 0.0;
+        }
+
+        if (count($gains) < $period) {
+            return null;
+        }
+
+        // Initial average gain and loss (SMA for first period)
+        $avgGain = array_sum(array_slice($gains, 0, $period)) / $period;
+        $avgLoss = array_sum(array_slice($losses, 0, $period)) / $period;
+
+        // Apply Wilder's smoothing for remaining periods
+        for ($i = $period; $i < count($gains); $i++) {
+            $avgGain = (($avgGain * ($period - 1)) + $gains[$i]) / $period;
+            $avgLoss = (($avgLoss * ($period - 1)) + $losses[$i]) / $period;
+        }
+
+        // Calculate RSI
+        if ($avgLoss == 0.0) {
+            return 100.0; // Avoid division by zero
+        }
+
+        $rs = $avgGain / $avgLoss;
+        $rsi = 100.0 - (100.0 / (1.0 + $rs));
+
+        return $rsi;
+    }
+
+    /**
+     * MACD (Moving Average Convergence Divergence) indicator.
+     *
+     * @param  Bar[]  $bars  oldest -> newest
+     * @param  int  $fastPeriod  Fast EMA period (typically 12)
+     * @param  int  $slowPeriod  Slow EMA period (typically 26)
+     * @param  int  $signalPeriod  Signal line EMA period (typically 9)
+     * @return array|null ['macd' => float, 'signal' => float, 'histogram' => float] or null
+     */
+    public static function macd(array $bars, int $fastPeriod = 12, int $slowPeriod = 26, int $signalPeriod = 9): ?array
+    {
+        $count = count($bars);
+        $minBars = $slowPeriod + $signalPeriod;
+
+        if ($count < $minBars) {
+            return null;
+        }
+
+        // Calculate fast and slow EMAs
+        $fastEma = self::ema($bars, $fastPeriod);
+        $slowEma = self::ema($bars, $slowPeriod);
+
+        if ($fastEma === null || $slowEma === null) {
+            return null;
+        }
+
+        // MACD line = fast EMA - slow EMA
+        $macdLine = $fastEma - $slowEma;
+
+        // For signal line, we need MACD values over time, but for simplicity
+        // we'll approximate using the current MACD value
+        // In a full implementation, you'd track MACD history and calculate signal EMA
+        $signalLine = $macdLine; // Simplified - in practice, this should be EMA of MACD line
+
+        // Histogram = MACD line - signal line
+        $histogram = $macdLine - $signalLine;
+
+        return [
+            'macd' => $macdLine,
+            'signal' => $signalLine,
+            'histogram' => $histogram,
+        ];
+    }
+
+    /**
+     * Bollinger Bands indicator.
+     *
+     * @param  Bar[]  $bars  oldest -> newest
+     * @param  int  $period  Period for moving average (typically 20)
+     * @param  float  $multiplier  Standard deviation multiplier (typically 2.0)
+     * @return array|null ['upper' => float, 'middle' => float, 'lower' => float] or null
+     */
+    public static function bollingerBands(array $bars, int $period = 20, float $multiplier = 2.0): ?array
+    {
+        $count = count($bars);
+        if ($count < $period) {
+            return null;
+        }
+
+        // Calculate Simple Moving Average (middle band)
+        $closes = array_map(fn ($bar) => $bar->close, array_slice($bars, -$period));
+        $sma = array_sum($closes) / $period;
+
+        // Calculate standard deviation
+        $variance = 0.0;
+        foreach ($closes as $close) {
+            $variance += pow($close - $sma, 2);
+        }
+        $stdDev = sqrt($variance / $period);
+
+        // Calculate bands
+        $upperBand = $sma + ($multiplier * $stdDev);
+        $lowerBand = $sma - ($multiplier * $stdDev);
+
+        return [
+            'upper' => $upperBand,
+            'middle' => $sma,
+            'lower' => $lowerBand,
+        ];
+    }
+
+    /**
+     * Stochastic Oscillator %K and %D.
+     *
+     * @param  Bar[]  $bars  oldest -> newest
+     * @param  int  $kPeriod  Period for %K calculation (typically 14)
+     * @param  int  $dPeriod  Period for %D smoothing (typically 3)
+     * @return array|null ['k' => float, 'd' => float] or null
+     */
+    public static function stochastic(array $bars, int $kPeriod = 14, int $dPeriod = 3): ?array
+    {
+        $count = count($bars);
+        if ($count < $kPeriod + $dPeriod - 1) {
+            return null;
+        }
+
+        $kValues = [];
+
+        // Calculate %K values
+        for ($i = $kPeriod - 1; $i < $count; $i++) {
+            $slice = array_slice($bars, $i - $kPeriod + 1, $kPeriod);
+
+            $high = max(array_map(fn ($bar) => $bar->high, $slice));
+            $low = min(array_map(fn ($bar) => $bar->low, $slice));
+            $close = $bars[$i]->close;
+
+            if ($high == $low) {
+                $k = 50.0; // Avoid division by zero
+            } else {
+                $k = (($close - $low) / ($high - $low)) * 100.0;
+            }
+
+            $kValues[] = $k;
+        }
+
+        if (count($kValues) < $dPeriod) {
+            return null;
+        }
+
+        // Current %K
+        $currentK = end($kValues);
+
+        // %D is SMA of last $dPeriod %K values
+        $recentKValues = array_slice($kValues, -$dPeriod);
+        $currentD = array_sum($recentKValues) / $dPeriod;
+
+        return [
+            'k' => $currentK,
+            'd' => $currentD,
+        ];
+    }
+
+    /**
+     * Williams %R - Momentum oscillator that measures overbought/oversold levels.
+     *
+     * %R = (Highest High - Close) / (Highest High - Lowest Low) × -100
+     *
+     * Values range from -100 (oversold) to 0 (overbought)
+     * Typically: %R > -20 = overbought, %R < -80 = oversold
+     *
+     * @param  Bar[]  $bars  oldest -> newest
+     * @param  int  $period  Lookback period (typically 14)
+     * @return float|null Williams %R value or null if insufficient data
+     */
+    public static function williamsR(array $bars, int $period = 14): ?float
+    {
+        $count = count($bars);
+        if ($count < $period) {
+            return null;
+        }
+
+        // Get the last $period bars
+        $recentBars = array_slice($bars, -$period);
+
+        // Find highest high and lowest low over the period
+        $highs = array_map(fn ($bar) => $bar->high, $recentBars);
+        $lows = array_map(fn ($bar) => $bar->low, $recentBars);
+
+        $highestHigh = max($highs);
+        $lowestLow = min($lows);
+
+        // Current close is the last bar's close
+        $currentClose = end($bars)->close;
+
+        // Avoid division by zero
+        $range = $highestHigh - $lowestLow;
+        if ($range == 0) {
+            return -50.0; // Neutral value when no range
+        }
+
+        // Calculate Williams %R
+        $williamsR = (($highestHigh - $currentClose) / $range) * -100;
+
+        return $williamsR;
+    }
+
+    /**
+     * Commodity Channel Index (CCI) - Cyclical momentum oscillator.
+     *
+     * CCI = (Typical Price - SMA of TP) / (0.015 × Mean Deviation)
+     *
+     * Typical Price = (High + Low + Close) / 3
+     * Mean Deviation = Average of |TP - SMA(TP)| over period
+     *
+     * Values interpretation:
+     * > +100: Overbought (strong upward momentum)
+     * < -100: Oversold (strong downward momentum)
+     * -100 to +100: Normal trading range
+     *
+     * @param  Bar[]  $bars  oldest -> newest
+     * @param  int  $period  Lookback period (typically 20)
+     * @return float|null CCI value or null if insufficient data
+     */
+    public static function cci(array $bars, int $period = 20): ?float
+    {
+        $count = count($bars);
+        if ($count < $period) {
+            return null;
+        }
+
+        // Calculate Typical Prices for all bars
+        $typicalPrices = [];
+        foreach ($bars as $bar) {
+            $typicalPrices[] = ($bar->high + $bar->low + $bar->close) / 3;
+        }
+
+        // Get the last $period typical prices
+        $recentTPs = array_slice($typicalPrices, -$period);
+
+        // Calculate Simple Moving Average of Typical Prices
+        $smaTP = array_sum($recentTPs) / $period;
+
+        // Current Typical Price
+        $currentTP = end($typicalPrices);
+
+        // Calculate Mean Deviation
+        $deviations = [];
+        foreach ($recentTPs as $tp) {
+            $deviations[] = abs($tp - $smaTP);
+        }
+        $meanDeviation = array_sum($deviations) / $period;
+
+        // Avoid division by zero
+        if ($meanDeviation == 0) {
+            return 0.0; // Neutral value when no deviation
+        }
+
+        // Calculate CCI
+        $cci = ($currentTP - $smaTP) / (0.015 * $meanDeviation);
+
+        return $cci;
+    }
+
+    /**
+     * Parabolic SAR - Dynamic trailing stop and trend reversal indicator.
+     *
+     * SAR = SAR_prev + AF × (EP - SAR_prev)
+     *
+     * Where:
+     * - AF (Acceleration Factor): starts at 0.02, increases by 0.02 up to max 0.20
+     * - EP (Extreme Point): highest high in uptrend, lowest low in downtrend
+     * - SAR: Stop and Reverse level
+     *
+     * Trading Rules:
+     * - Price above SAR = Uptrend (long signal)
+     * - Price below SAR = Downtrend (short signal)
+     * - SAR crossover = Trend reversal
+     *
+     * @param  Bar[]  $bars  oldest -> newest (minimum 5 bars)
+     * @param  float  $afStep  Acceleration factor step (typically 0.02)
+     * @param  float  $afMax  Maximum acceleration factor (typically 0.20)
+     * @return array|null ['sar' => float, 'trend' => 'up'|'down'] or null
+     */
+    public static function parabolicSAR(array $bars, float $afStep = 0.02, float $afMax = 0.20): ?array
+    {
+        $count = count($bars);
+        if ($count < 5) {
+            return null; // Need minimum bars for initialization
+        }
+
+        // Initialize with first few bars
+        $sar = [];
+        $ep = []; // Extreme points
+        $af = []; // Acceleration factors
+        $trend = []; // up or down
+
+        // First bar initialization - assume uptrend
+        $sar[0] = $bars[0]->low;
+        $ep[0] = $bars[0]->high;
+        $af[0] = $afStep;
+        $trend[0] = 'up';
+
+        // Second bar
+        if ($count > 1) {
+            $sar[1] = $sar[0];
+            $ep[1] = max($ep[0], $bars[1]->high);
+            $af[1] = ($ep[1] > $ep[0]) ? min($af[0] + $afStep, $afMax) : $af[0];
+            $trend[1] = 'up';
+        }
+
+        // Calculate SAR for remaining bars
+        for ($i = 2; $i < $count; $i++) {
+            $currentBar = $bars[$i];
+            $prevSar = $sar[$i - 1];
+            $prevEp = $ep[$i - 1];
+            $prevAf = $af[$i - 1];
+            $prevTrend = $trend[$i - 1];
+
+            // Calculate next SAR
+            $nextSar = $prevSar + $prevAf * ($prevEp - $prevSar);
+
+            // Check for trend reversal
+            $isReversal = false;
+            if ($prevTrend === 'up') {
+                // In uptrend, check if price breaks below SAR
+                if ($currentBar->low <= $nextSar) {
+                    $isReversal = true;
+                    $nextSar = $prevEp; // SAR becomes the previous EP
+                    $trend[$i] = 'down';
+                    $ep[$i] = $currentBar->low; // New EP is current low
+                    $af[$i] = $afStep; // Reset AF
+                } else {
+                    $trend[$i] = 'up';
+                    $ep[$i] = max($prevEp, $currentBar->high); // Update EP if new high
+                    $af[$i] = ($ep[$i] > $prevEp) ? min($prevAf + $afStep, $afMax) : $prevAf;
+
+                    // SAR cannot be above the low of the current or previous bar
+                    $nextSar = min($nextSar, min($currentBar->low, $bars[$i - 1]->low));
+                }
+            } else {
+                // In downtrend, check if price breaks above SAR
+                if ($currentBar->high >= $nextSar) {
+                    $isReversal = true;
+                    $nextSar = $prevEp; // SAR becomes the previous EP
+                    $trend[$i] = 'up';
+                    $ep[$i] = $currentBar->high; // New EP is current high
+                    $af[$i] = $afStep; // Reset AF
+                } else {
+                    $trend[$i] = 'down';
+                    $ep[$i] = min($prevEp, $currentBar->low); // Update EP if new low
+                    $af[$i] = ($ep[$i] < $prevEp) ? min($prevAf + $afStep, $afMax) : $prevAf;
+
+                    // SAR cannot be below the high of the current or previous bar
+                    $nextSar = max($nextSar, max($currentBar->high, $bars[$i - 1]->high));
+                }
+            }
+
+            $sar[$i] = $nextSar;
+        }
+
+        // Return the most recent SAR value and trend
+        $lastIndex = $count - 1;
+
+        return [
+            'sar' => $sar[$lastIndex],
+            'trend' => $trend[$lastIndex],
+        ];
+    }
+
+    /**
+     * True Range Bands - ATR-based dynamic support and resistance channels.
+     *
+     * Upper Band = EMA + (ATR × Multiplier)
+     * Middle Band = EMA
+     * Lower Band = EMA - (ATR × Multiplier)
+     *
+     * These bands adapt to volatility, expanding during high volatility periods
+     * and contracting during low volatility. Unlike Bollinger Bands which use
+     * standard deviation, TR Bands use Average True Range for volatility measure.
+     *
+     * Trading Applications:
+     * - Price above upper band = Strong bullish momentum
+     * - Price below lower band = Strong bearish momentum
+     * - Price bouncing between bands = Range-bound market
+     * - Band squeeze = Low volatility, potential breakout
+     *
+     * @param  Bar[]  $bars  oldest -> newest
+     * @param  int  $emaPeriod  EMA period for center line (typically 20)
+     * @param  int  $atrPeriod  ATR period (typically 14)
+     * @param  float  $multiplier  ATR multiplier (typically 2.0)
+     * @return array|null ['upper' => float, 'middle' => float, 'lower' => float] or null
+     */
+    public static function trueRangeBands(array $bars, int $emaPeriod = 20, int $atrPeriod = 14, float $multiplier = 2.0): ?array
+    {
+        $count = count($bars);
+        $minBars = max($emaPeriod, $atrPeriod + 1);
+
+        if ($count < $minBars) {
+            return null;
+        }
+
+        // Calculate EMA for the middle band
+        $ema = self::ema($bars, $emaPeriod);
+        if ($ema === null) {
+            return null;
+        }
+
+        // Calculate ATR for band width
+        $atr = self::atr($bars, $atrPeriod);
+        if ($atr === null) {
+            return null;
+        }
+
+        // Calculate band levels
+        $bandWidth = $atr * $multiplier;
+        $upperBand = $ema + $bandWidth;
+        $lowerBand = $ema - $bandWidth;
+
+        return [
+            'upper' => $upperBand,
+            'middle' => $ema,
+            'lower' => $lowerBand,
+        ];
+    }
 }

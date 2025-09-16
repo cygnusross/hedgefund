@@ -3,22 +3,24 @@
 namespace App\Services\IG\Endpoints;
 
 use App\Services\IG\BaseEndpoint;
-use App\Services\IG\DTO\WorkingOrderRequest;
 
 class WorkingOrdersOtcEndpoint extends BaseEndpoint
 {
     /**
      * Create an OTC working order (version 2 endpoint).
      *
-     * @param  array  $payload  Expecting ['request' => [...]] where request follows IG spec
+     * @param  array  $payload  Flat payload for IG API (no 'request' wrapper needed)
      * @return array ['dealReference' => string]
      */
     public function create(array $payload): array
     {
-        // Validate and normalize payload
-        $normalized = WorkingOrderRequest::validate($payload);
+        // Debug log the actual payload being sent
+        \Illuminate\Support\Facades\Log::info('IG Working Order Payload', [
+            'raw_payload' => $payload,
+        ]);
 
-        $resp = $this->client->post('/working-orders/otc', $normalized);
+        // Send the flat payload directly (VERSION 2 expects fields at top level)
+        $resp = $this->client->post('/workingorders/otc', $payload);
 
         $body = $resp['body'] ?? [];
 

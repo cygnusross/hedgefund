@@ -4,6 +4,7 @@ namespace App\Services\Prices;
 
 use App\Domain\Market\Bar;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class TwelveDataProvider implements PriceProvider
 {
@@ -15,7 +16,7 @@ class TwelveDataProvider implements PriceProvider
     }
 
     /**
-     * Params accepted: interval (e.g., '5min'), outputsize (int)
+     * Params accepted: interval (e.g., '5min'), outputsize (int), start_date, end_date, timezone
      *
      * @return array<App\Domain\Market\Bar> Oldest -> newest
      */
@@ -30,6 +31,9 @@ class TwelveDataProvider implements PriceProvider
             'outputsize' => $outputsize,
             'format' => 'JSON',
             'apikey' => $this->apiKey,
+            'start_date' => $params['start_date'] ?? null,
+            'end_date' => $params['end_date'] ?? null,
+            'timezone' => $params['timezone'] ?? 'UTC',
         ]);
 
         $resp = Http::baseUrl($this->baseUrl)
@@ -41,6 +45,13 @@ class TwelveDataProvider implements PriceProvider
         $body = $resp->body();
 
         if ($status < 200 || $status >= 300) {
+            Log::warning('TwelveData HTTP error', [
+                'symbol' => $symbol,
+                'params' => $params,
+                'status' => $status,
+                'response_body' => $body,
+                'query' => $query,
+            ]);
             throw new \RuntimeException("TwelveData HTTP {$status}: {$body}");
         }
 
@@ -48,6 +59,13 @@ class TwelveDataProvider implements PriceProvider
 
         $values = $data['values'] ?? null;
         if (! is_array($values) || empty($values)) {
+            Log::warning('TwelveData empty/missing values', [
+                'symbol' => $symbol,
+                'params' => $params,
+                'status' => $status,
+                'response_data' => $data,
+                'query' => $query,
+            ]);
             throw new \RuntimeException('TwelveData: missing/empty values');
         }
 

@@ -99,6 +99,14 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(\App\Domain\Execution\PositionLedgerContract::class, function ($app) {
             return new \App\Domain\Execution\NullPositionLedger;
         });
+
+        // Bind WorkingOrderService with its dependencies
+        $this->app->bind(\App\Services\IG\WorkingOrderService::class, function ($app) {
+            return new \App\Services\IG\WorkingOrderService(
+                $app->make(\App\Services\IG\Client::class),
+                $app->make(\App\Services\IG\Endpoints\WorkingOrdersOtcEndpoint::class)
+            );
+        });
     }
 
     /**

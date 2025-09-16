@@ -44,7 +44,7 @@ final class AlphaRules
             throw new RuntimeException('AlphaRules: YAML did not parse to an array');
         }
 
-        // Minimal schema requirements
+        // Minimal schema requirements - session_filters is optional for backward compatibility
         $required = ['gates', 'confluence', 'risk', 'execution', 'cooldowns', 'overrides'];
         foreach ($required as $k) {
             if (! array_key_exists($k, $parsed)) {
@@ -120,6 +120,11 @@ final class AlphaRules
     public function getCooldown(string $key, $default = null)
     {
         return $this->get('cooldowns.'.$key, $default);
+    }
+
+    public function getSessionFilter(string $key, $default = null)
+    {
+        return $this->get('session_filters.'.$key, $default);
     }
 
     /**

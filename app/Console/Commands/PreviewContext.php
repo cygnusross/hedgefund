@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 
 final class PreviewContext extends Command
 {
-    protected $signature = 'context:preview {pair} {--now=} {--days=1} {--force-news} {--force-calendar} {--force-sentiment} {--news-date=} {--news-fresh} {--force-spread}';
+    protected $signature = 'context:preview {pair} {--now=} {--days=1} {--force-calendar} {--force-sentiment} {--news-date=} {--refresh-news : Ingest fresh news before building context} {--force-spread}';
 
     protected $description = 'Preview the decision context JSON for a pair at a given time.';
 
@@ -24,20 +24,20 @@ final class PreviewContext extends Command
         $days = (int) $this->option('days');
 
         // Optional force-refresh flags
-        $forceNews = (bool) $this->option('force-news');
         $forceCalendar = (bool) $this->option('force-calendar');
+        $refreshNews = (bool) $this->option('refresh-news');
 
         // News options
         $newsDateOpt = $this->option('news-date'); // 'today'|'yesterday'|'YYYY-MM-DD' or null
-        $newsFresh = (bool) $this->option('news-fresh');
 
-        // Run refresh commands before building context if requested
-        if ($forceNews) {
-            $this->callSilent('news:refresh', ['pair' => $pair, '--days' => $days]);
+        // Ingest fresh news before building context if requested
+        if ($refreshNews) {
+            $this->line('Refreshing news data...');
+            $this->call('news:ingest', ['--today' => true]);
         }
 
         if ($forceCalendar) {
-            $this->callSilent('calendar:refresh', ['--force' => true]);
+            $this->call('calendar:refresh', ['--force' => true]);
         }
 
         $ts = $nowOpt ? new \DateTimeImmutable($nowOpt, new \DateTimeZone('UTC')) : new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
@@ -47,7 +47,8 @@ final class PreviewContext extends Command
 
         $contextBuilder = app(ContextBuilder::class);
 
-        $ctx = $contextBuilder->build($pair, $ts, $newsDateOpt ?? $days, $newsFresh, $forceSpread, ['force_sentiment' => $forceSentiment]);
+        // Use false for $fresh since we handle news refresh explicitly above
+        $ctx = $contextBuilder->build($pair, $ts, $newsDateOpt ?? $days, false, $forceSpread, ['force_sentiment' => $forceSentiment]);
 
         if ($ctx === null) {
             $this->line('Not enough warm-up.');

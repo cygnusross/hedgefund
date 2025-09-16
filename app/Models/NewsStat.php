@@ -61,14 +61,12 @@ class NewsStat extends Model
         ];
 
         // Try to find an existing record using whereDate (safer for sqlite/text date formats)
-        $existing = static::where('pair_norm', $values['pair_norm'])->whereDate('stat_date', $values['stat_date'])->first();
-        if ($existing) {
-            $existing->fill($values);
-            $existing->save();
-
-            return $existing;
-        }
-
-        return static::create($values);
+        return static::updateOrCreate(
+            [
+                'pair_norm' => $values['pair_norm'],
+                'stat_date' => $values['stat_date'],
+            ],
+            $values
+        );
     }
 }

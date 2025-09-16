@@ -180,7 +180,28 @@ class SpreadEstimator
             return ['spread' => null, 'status' => $statusNormalized];
         }
 
-        $spread = ($offer - $bid) / $pipSize;
+        // Handle IG Mini contracts that use scaled pricing
+        $rawSpread = $offer - $bid;
+        $actualSpread = $rawSpread;
+
+        // Detect Mini contracts by epic or instrument name
+        $instrumentName = $body['instrument']['name'] ?? '';
+        if (str_contains($epic, 'MINI') || str_contains(strtolower($instrumentName), 'mini')) {
+            // Mini contracts use POINTS-based pricing that needs scaling
+            $scalingFactor = $this->detectMiniContractScalingFactor($pair, $bid);
+            if ($scalingFactor > 1) {
+                $actualSpread = $rawSpread / $scalingFactor;
+                $this->logInfo('mini_contract_scaling_applied', [
+                    'pair' => $pair,
+                    'epic' => $epic,
+                    'raw_spread' => $rawSpread,
+                    'scaling_factor' => $scalingFactor,
+                    'actual_spread' => $actualSpread,
+                ]);
+            }
+        }
+
+        $spread = $actualSpread / $pipSize;
         if (! is_finite($spread) || $spread <= 0) {
             $this->logWarning('non_positive_spread', ['pair' => $pair, 'epic' => $epic, 'spread' => $spread]);
 
@@ -201,5 +222,60 @@ class SpreadEstimator
 
         // Fallback to facade when a PSR logger wasn't injected
         LogFacade::warning($reason, $context);
+    }
+
+    protected function logInfo(string $message, array $context = []): void
+    {
+        if ($this->logger instanceof LoggerInterface) {
+            $this->logger->info($message, $context);
+
+            return;
+        }
+
+        // Fallback to facade when a PSR logger wasn't injected
+        LogFacade::info($message, $context);
+    }
+
+    /**
+     * Detect scaling factor for Mini contracts by comparing IG prices with expected FX ranges.
+     * Mini contracts use POINTS-based pricing that differs from standard FX pricing.
+     */
+    protected function detectMiniContractScalingFactor(string $pair, float $igPrice): float
+    {
+        // Define expected price ranges for major FX pairs
+        $expectedRanges = [
+            'EUR/USD' => [1.0, 1.3],
+            'EUR-USD' => [1.0, 1.3],
+            'GBP/USD' => [1.1, 1.4],
+            'GBP-USD' => [1.1, 1.4],
+            'USD/JPY' => [100, 160],
+            'USD-JPY' => [100, 160],
+            'AUD/USD' => [0.6, 0.8],
+            'AUD-USD' => [0.6, 0.8],
+            'EUR/GBP' => [0.8, 0.95],
+            'EUR-GBP' => [0.8, 0.95],
+        ];
+
+        $normalizedPair = strtoupper(str_replace(['/', '-'], ['/', '/'], $pair));
+        $altPair = str_replace('/', '-', $normalizedPair);
+
+        $expectedRange = $expectedRanges[$normalizedPair] ?? $expectedRanges[$altPair] ?? null;
+
+        if (! $expectedRange || $igPrice <= 0) {
+            return 1.0; // No scaling if we can't determine expected range
+        }
+
+        [$minExpected, $maxExpected] = $expectedRange;
+        $midExpected = ($minExpected + $maxExpected) / 2;
+
+        // If IG price is significantly outside expected range, calculate scaling factor
+        if ($igPrice > $maxExpected * 10) {
+            $scalingFactor = $igPrice / $midExpected;
+
+            // Round to reasonable precision and ensure it's sensible
+            return round($scalingFactor, 0);
+        }
+
+        return 1.0; // No scaling needed
     }
 }

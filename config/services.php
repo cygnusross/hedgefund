@@ -45,6 +45,10 @@ return [
             'username' => env('IG_DEMO_USERNAME'),
             'password' => env('IG_DEMO_PASSWORD'),
         ],
+        'retry' => [
+            'attempts' => env('IG_RETRY_ATTEMPTS', 1),
+            'delay' => env('IG_RETRY_DELAY', 100),
+        ],
     ],
 
 ];

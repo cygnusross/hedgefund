@@ -72,6 +72,34 @@ YAML;
     });
 });
 
+it('demonstrates account balance integration with position sizing', function () {
+    // Test the Risk\Sizing class directly with different account balances
+    // This verifies that position sizing scales correctly with account size
+
+    $riskPct = 1.0; // 1% risk
+    $slPips = 20.0; // 20 pips stop loss
+    $pipValue = 1.0; // £1 per pip
+    $sizeStep = 0.01; // minimum increment
+
+    // Primary Trading Sleeve (£50,000)
+    $primarySize = \App\Domain\Risk\Sizing::computeStake(50000.0, $riskPct, $slPips, $pipValue, $sizeStep);
+
+    // Conservative Sleeve (£25,000)
+    $conservativeSize = \App\Domain\Risk\Sizing::computeStake(25000.0, $riskPct, $slPips, $pipValue, $sizeStep);
+
+    // Default/old hardcoded (£10,000)
+    $defaultSize = \App\Domain\Risk\Sizing::computeStake(10000.0, $riskPct, $slPips, $pipValue, $sizeStep);
+
+    // Verify position sizes scale with account balance
+    expect($primarySize)->toBe(25.0); // 1% of £50k / 20 pips / £1 per pip
+    expect($conservativeSize)->toBe(12.5); // 1% of £25k / 20 pips / £1 per pip
+    expect($defaultSize)->toBe(5.0); // 1% of £10k / 20 pips / £1 per pip
+
+    // Verify proportional scaling
+    expect($primarySize)->toBe($defaultSize * 5); // 50k is 5x larger than 10k
+    expect($conservativeSize)->toBe($defaultSize * 2.5); // 25k is 2.5x larger than 10k
+});
+
 it('computes size for usdjpy with different pip sizing', function () {
     $rulesYaml = <<<'YAML'
 gates:

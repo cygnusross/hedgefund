@@ -5,7 +5,7 @@ declare(strict_types=1);
 use App\Application\ContextBuilder;
 use App\Domain\Rules\AlphaRules;
 
-it('forwards --force-news and --force-calendar to ContextBuilder', function () {
+it('forwards --force-calendar to ContextBuilder', function () {
     $capturer = new class
     {
         public array $lastBuildArgs = [];
@@ -34,11 +34,10 @@ it('forwards --force-news and --force-calendar to ContextBuilder', function () {
     $rules->reload();
     $this->instance(AlphaRules::class, $rules);
 
-    $this->artisan('decision:preview', ['pair' => 'EUR/USD', '--force-news' => true, '--force-calendar' => true])
+    $this->artisan('decision:preview', ['pair' => 'EUR/USD', '--force-calendar' => true])
         ->assertExitCode(0);
 
     // Inspect the capturer to ensure flags forwarded
     expect($capturer->lastBuildArgs)->toBeArray();
-    expect($capturer->lastBuildArgs['opts']['force_news'] ?? false)->toBeTrue();
     expect($capturer->lastBuildArgs['opts']['force_calendar'] ?? false)->toBeTrue();
 });

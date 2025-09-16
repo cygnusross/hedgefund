@@ -37,13 +37,22 @@ final class DecisionEngine
         $dataAge = $ctx['meta']['data_age_sec'] ?? null;
         $maxDataAge = (int) $rules->getGate('max_data_age_sec', 600);
         if ($dataAge === null || $dataAge > $maxDataAge) {
-            $reasons[] = 'stale_data';
+            $reason = $dataAge === null ? 'no_bar_data' : 'bar_data_stale';
+            $reasons[] = $reason;
 
             return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
         }
 
         if (($ctx['calendar']['within_blackout'] ?? $ctx['blackout'] ?? false) === true) {
             $reasons[] = 'blackout';
+
+            return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+        }
+
+        // Session filtering - avoid trading during suboptimal periods
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        if (! $this->isOptimalTradingSession($now, $rules)) {
+            $reasons[] = 'suboptimal_session';
 
             return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
         }
@@ -77,6 +86,120 @@ final class DecisionEngine
             $zAbsMax = (float) $zRaw;
             if ($z !== null && abs((float) $z) > $zAbsMax) {
                 $reasons[] = 'stretched_z';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+        }
+
+        // New indicator-based gates
+        $rsi = data_get($ctx, 'features.rsi14');
+        $stochK = data_get($ctx, 'features.stoch_k');
+        $williamsR = data_get($ctx, 'features.williamsR');
+        $cci = data_get($ctx, 'features.cci');
+        $parabolicSAR = data_get($ctx, 'features.parabolicSAR');
+        $parabolicSARTrend = data_get($ctx, 'features.parabolicSARTrend');
+        $bbUpper = data_get($ctx, 'features.bb_upper');
+        $bbLower = data_get($ctx, 'features.bb_lower');
+        $trUpper = data_get($ctx, 'features.tr_upper');
+        $trLower = data_get($ctx, 'features.tr_lower');
+        $lastPrice = data_get($ctx, 'market.last_price');
+
+        // RSI overbought/oversold filter
+        $rsiOverbought = (float) $rules->getGate('rsi_overbought', 75);
+        $rsiOversold = (float) $rules->getGate('rsi_oversold', 25);
+
+        if ($rsi !== null) {
+            if ((float) $rsi > $rsiOverbought) {
+                $reasons[] = 'rsi_overbought';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+            if ((float) $rsi < $rsiOversold) {
+                $reasons[] = 'rsi_oversold';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+        }
+
+        // Stochastic extreme filter (avoid trades when extremely overbought/oversold)
+        $stochExtreme = (float) $rules->getGate('stoch_extreme', 95);
+        if ($stochK !== null && ((float) $stochK > $stochExtreme || (float) $stochK < (100 - $stochExtreme))) {
+            $reasons[] = 'stoch_extreme';
+
+            return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+        }
+
+        // Williams %R extreme filter (more sensitive than Stochastic)
+        // %R ranges from -100 to 0: -20 to 0 = overbought, -100 to -80 = oversold
+        $williamsROverbought = (float) $rules->getGate('williams_r_overbought', -20);
+        $williamsROversold = (float) $rules->getGate('williams_r_oversold', -80);
+
+        if ($williamsR !== null) {
+            if ((float) $williamsR > $williamsROverbought) {
+                $reasons[] = 'williams_r_overbought';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+            if ((float) $williamsR < $williamsROversold) {
+                $reasons[] = 'williams_r_oversold';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+        }
+
+        // CCI extreme filter (cyclical momentum extremes)
+        // CCI > +100 = strong overbought, CCI < -100 = strong oversold
+        $cciOverbought = (float) $rules->getGate('cci_overbought', 100);
+        $cciOversold = (float) $rules->getGate('cci_oversold', -100);
+
+        if ($cci !== null) {
+            if ((float) $cci > $cciOverbought) {
+                $reasons[] = 'cci_overbought';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+            if ((float) $cci < $cciOversold) {
+                $reasons[] = 'cci_oversold';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+        }
+
+        // Parabolic SAR trend confirmation filter
+        $requireSarTrendAlignment = (bool) $rules->getGate('require_sar_trend_alignment', false);
+
+        if ($requireSarTrendAlignment && $parabolicSARTrend !== null && $lastPrice !== null && $parabolicSAR !== null) {
+            $newsDirection = data_get($ctx, 'news.direction');
+
+            // Check if news direction conflicts with SAR trend
+            if ($newsDirection === 'buy' && $parabolicSARTrend === 'down') {
+                $reasons[] = 'sar_trend_conflict';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+            if ($newsDirection === 'sell' && $parabolicSARTrend === 'up') {
+                $reasons[] = 'sar_trend_conflict';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+        }
+
+        // True Range Bands breakout filter (volatility-based momentum)
+        $requireTrBreakout = (bool) $rules->getGate('require_tr_breakout', false);
+
+        if ($requireTrBreakout && $trUpper !== null && $trLower !== null && $lastPrice !== null) {
+            $newsDirection = data_get($ctx, 'news.direction');
+
+            // For buy signals, require price to be breaking above upper TR band (strong momentum)
+            if ($newsDirection === 'buy' && $lastPrice <= $trUpper) {
+                $reasons[] = 'insufficient_tr_breakout';
+
+                return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+            }
+
+            // For sell signals, require price to be breaking below lower TR band (strong momentum)
+            if ($newsDirection === 'sell' && $lastPrice >= $trLower) {
+                $reasons[] = 'insufficient_tr_breakout';
 
                 return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
             }
@@ -292,6 +415,11 @@ final class DecisionEngine
         $riskPct = min((float) $riskPctRaw, $perTradeCap);
 
         $slPips = max(1e-6, $slMult * $atrP);
+
+        // CRITICAL: Enforce minimum stop loss for margin safety (prevents margin rejection)
+        $slMinPips = (float) $rules->getExecution('sl_min_pips', 15.0);
+        $slPips = max($slPips, $slMinPips);
+
         $tpPips = max(1e-6, $tpMult * $atrP);
 
         $pairNorm = data_get($ctx, 'meta.pair_norm') ?? data_get($ctx, 'meta.pair') ?? '';
@@ -319,6 +447,50 @@ final class DecisionEngine
             $entry = $last;
             $sl = 0.0;
             $tp = 0.0;
+        }
+
+        // CRITICAL: Risk-Reward validation - enforce minimum RR ratio
+        if ($proposedAction !== 'hold') {
+            $actualRiskPips = abs($entry - $sl) / $pipSize;
+            $actualRewardPips = abs($tp - $entry) / $pipSize;
+
+            if ($actualRiskPips > 0) {
+                $actualRR = $actualRewardPips / $actualRiskPips;
+                $minRR = (float) $rules->getExecution('rr', 1.8);
+
+                if ($actualRR < $minRR) {
+                    $reasons[] = 'poor_risk_reward';
+
+                    return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+                }
+            }
+        }
+
+        // CRITICAL: Resistance/Support proximity filter
+        if ($proposedAction === 'buy') {
+            $resistanceLevels = data_get($ctx, 'features.resistanceLevels', []);
+            $minDistancePips = 5.0; // Minimum 5 pips to nearest resistance
+
+            foreach ($resistanceLevels as $level) {
+                $distancePips = ($level - $entry) / $pipSize;
+                if ($distancePips > 0 && $distancePips < $minDistancePips) {
+                    $reasons[] = 'too_close_to_resistance';
+
+                    return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+                }
+            }
+        } elseif ($proposedAction === 'sell') {
+            $supportLevels = data_get($ctx, 'features.supportLevels', []);
+            $minDistancePips = 5.0; // Minimum 5 pips to nearest support
+
+            foreach ($supportLevels as $level) {
+                $distancePips = ($entry - $level) / $pipSize;
+                if ($distancePips > 0 && $distancePips < $minDistancePips) {
+                    $reasons[] = 'too_close_to_support';
+
+                    return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+                }
+            }
         }
 
         // Compute stake/size using Risk Sizing helper
@@ -382,5 +554,99 @@ final class DecisionEngine
         }
 
         return $out;
+    }
+
+    /**
+     * Check if current time is within optimal trading session based on rules configuration.
+     *
+     * @param  \DateTimeImmutable  $now  Current time in UTC
+     * @param  AlphaRules  $rules  Rules configuration with session_filters
+     * @return bool True if optimal, false if suboptimal
+     */
+    private function isOptimalTradingSession(\DateTimeImmutable $now, AlphaRules $rules): bool
+    {
+        $sessionFilter = $rules->getSessionFilter('default');
+        if (! $sessionFilter) {
+            // No session filtering configured - allow all times
+            return true;
+        }
+
+        $gmtHour = (int) $now->format('H');
+        $gmtMinute = (int) $now->format('i');
+        $currentTimeMinutes = $gmtHour * 60 + $gmtMinute;
+
+        // Check avoid_sessions
+        if (isset($sessionFilter['avoid_sessions'])) {
+            foreach ($sessionFilter['avoid_sessions'] as $session => $timeRange) {
+                if ($this->isTimeInRange($currentTimeMinutes, $timeRange)) {
+                    return false;
+                }
+            }
+        }
+
+        // Check preferred_sessions (if configured)
+        if (isset($sessionFilter['preferred_sessions'])) {
+            foreach ($sessionFilter['preferred_sessions'] as $session => $timeRange) {
+                if ($this->isTimeInRange($currentTimeMinutes, $timeRange)) {
+                    return true;
+                }
+            }
+
+            // If preferred sessions are configured but current time doesn't match any, reject
+            return false;
+        }
+
+        // No specific restrictions or preferences - allow
+        return true;
+    }
+
+    /**
+     * Check if current time (in minutes from midnight GMT) falls within a given time range.
+     *
+     * @param  int  $currentMinutes  Minutes from midnight GMT (0-1439)
+     * @param  array  $range  Time range with 'start' and 'end' keys (in "HH:MM" format)
+     * @return bool True if time is within range
+     */
+    private function isTimeInRange(int $currentMinutes, array $range): bool
+    {
+        if (! isset($range['start']) || ! isset($range['end'])) {
+            return false;
+        }
+
+        $startMinutes = $this->parseTimeToMinutes($range['start']);
+        $endMinutes = $this->parseTimeToMinutes($range['end']);
+
+        if ($startMinutes === null || $endMinutes === null) {
+            return false;
+        }
+
+        // Handle ranges that cross midnight (e.g., 22:00-06:00)
+        if ($startMinutes > $endMinutes) {
+            return $currentMinutes >= $startMinutes || $currentMinutes <= $endMinutes;
+        }
+
+        return $currentMinutes >= $startMinutes && $currentMinutes <= $endMinutes;
+    }
+
+    /**
+     * Parse time string "HH:MM" to minutes from midnight.
+     *
+     * @param  string  $timeStr  Time in "HH:MM" format
+     * @return int|null Minutes from midnight, or null if invalid format
+     */
+    private function parseTimeToMinutes(string $timeStr): ?int
+    {
+        if (! preg_match('/^(\d{1,2}):(\d{2})$/', $timeStr, $matches)) {
+            return null;
+        }
+
+        $hour = (int) $matches[1];
+        $minute = (int) $matches[2];
+
+        if ($hour > 23 || $minute > 59) {
+            return null;
+        }
+
+        return $hour * 60 + $minute;
     }
 }

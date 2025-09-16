@@ -120,6 +120,16 @@ final class FeatureEngine
             $resistanceLevels = array_slice($rawResists, 0, 3);
         }
 
+        // Stage 6: Calculate new technical indicators
+        $rsi14 = Indicators::rsi($slice5, 14);
+        $macd = Indicators::macd($slice5, 12, 26, 9);
+        $bbands = Indicators::bollingerBands($slice5, 20, 2.0);
+        $stoch = Indicators::stochastic($slice5, 14, 3);
+        $williamsR = Indicators::williamsR($slice5, 14);
+        $cci = Indicators::cci($slice5, 20);
+        $psar = Indicators::parabolicSAR($slice5, 0.02, 0.20);
+        $trBands = Indicators::trueRangeBands($slice5, 20, 14, 2.0);
+
         return new FeatureSet(
             $ts,
             $ema20,
@@ -130,6 +140,23 @@ final class FeatureEngine
             $trend30m,
             $supportLevels,
             $resistanceLevels,
+            // New indicators
+            $rsi14,
+            $macd['macd'] ?? null,
+            $macd['signal'] ?? null,
+            $macd['histogram'] ?? null,
+            $bbands['upper'] ?? null,
+            $bbands['middle'] ?? null,
+            $bbands['lower'] ?? null,
+            $stoch['k'] ?? null,
+            $stoch['d'] ?? null,
+            $williamsR,
+            $cci,
+            $psar['sar'] ?? null,
+            $psar['trend'] ?? null,
+            $trBands['upper'] ?? null,
+            $trBands['middle'] ?? null,
+            $trBands['lower'] ?? null,
         );
     }
 }

@@ -20,7 +20,12 @@ function makeContext(array $overrides = []): mixed
         [],
     );
 
-    $meta = ['data_age_sec' => $overrides['data_age_sec'] ?? 0];
+    $meta = [];
+    if (array_key_exists('data_age_sec', $overrides)) {
+        $meta['data_age_sec'] = $overrides['data_age_sec'];
+    } else {
+        $meta['data_age_sec'] = 0;
+    }
     $ctx = new DecisionContext('EUR/USD', $ts, $features, $meta);
     $arr = $ctx->toArray();
 
@@ -102,7 +107,16 @@ it('blocks when data is stale', function () {
     $engine = new DecisionEngine;
     $res = $engine->decide($ctx, $rules);
     expect(is_array($res['reasons']))->toBeTrue();
-    expect($res['reasons'])->toContain('stale_data');
+    expect($res['reasons'])->toContain('bar_data_stale');
+});
+
+it('blocks when no bar data is available', function () {
+    $ctx = makeContext(['data_age_sec' => null]);
+    $rules = makeRules();
+    $engine = new DecisionEngine;
+    $res = $engine->decide($ctx, $rules);
+    expect(is_array($res['reasons']))->toBeTrue();
+    expect($res['reasons'])->toContain('no_bar_data');
 });
 
 it('blocks on calendar blackout', function () {

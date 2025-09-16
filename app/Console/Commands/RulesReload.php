@@ -34,6 +34,7 @@ final class RulesReload extends Command
             $this->line('risk.per_trade_cap_pct: '.json_encode($rules->get('risk.per_trade_cap_pct')));
             $this->line('execution.rr: '.json_encode($rules->get('execution.rr')));
             $this->line('execution.spread_ceiling_pips: '.json_encode($rules->get('execution.spread_ceiling_pips')));
+            $this->line('execution.sl_min_pips: '.json_encode($rules->get('execution.sl_min_pips')));
         }
 
         return 0;

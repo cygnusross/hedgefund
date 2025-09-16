@@ -96,7 +96,7 @@ class CalendarCsvImporter
         }
 
         // Pattern is fixed to '*.csv' per new policy
-        $patternPath = rtrim($fullPath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . '*.csv';
+        $patternPath = rtrim($fullPath, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'*.csv';
         $matches = glob($patternPath) ?: [];
 
         $summary = [
@@ -184,8 +184,8 @@ class CalendarCsvImporter
 
             $dir = dirname($file);
             $base = basename($file);
-            $processedDir = $dir . DIRECTORY_SEPARATOR . 'processed';
-            $failedDir = $dir . DIRECTORY_SEPARATOR . 'failed';
+            $processedDir = $dir.DIRECTORY_SEPARATOR.'processed';
+            $failedDir = $dir.DIRECTORY_SEPARATOR.'failed';
 
             // Ensure directories exist when needed
             if (! $this->files->exists($processedDir)) {
@@ -202,7 +202,7 @@ class CalendarCsvImporter
             if ($isImported && ! $hasErrors) {
                 if ($keepFiles) {
                     // move to processed/filename.csv
-                    $dest = $processedDir . DIRECTORY_SEPARATOR . $base;
+                    $dest = $processedDir.DIRECTORY_SEPARATOR.$base;
                     try {
                         $this->files->move($file, $dest);
                     } catch (\Exception $e) {
@@ -215,7 +215,7 @@ class CalendarCsvImporter
                 }
             } else {
                 // Partial or parse errors -> move to failed and write errors file
-                $dest = $failedDir . DIRECTORY_SEPARATOR . $base;
+                $dest = $failedDir.DIRECTORY_SEPARATOR.$base;
                 try {
                     $this->files->move($file, $dest);
                 } catch (\Exception $e) {
@@ -224,7 +224,7 @@ class CalendarCsvImporter
                 }
 
                 // write errors with line numbers + reasons
-                $errorFile = $failedDir . DIRECTORY_SEPARATOR . $base . '.errors.txt';
+                $errorFile = $failedDir.DIRECTORY_SEPARATOR.$base.'.errors.txt';
                 $errorLines = [];
                 foreach ($result['errors'] ?? [] as $err) {
                     if (is_array($err)) {
@@ -279,11 +279,11 @@ class CalendarCsvImporter
 
         // Split into non-empty lines and preserve order
         $allLines = preg_split('/\\r?\\n/', $contents) ?: [];
-        $lines = array_values(array_filter($allLines, fn($l) => trim((string) $l) !== ''));
+        $lines = array_values(array_filter($allLines, fn ($l) => trim((string) $l) !== ''));
 
         // Derive default source from file basename
         $fileBase = basename($file);
-        $defaultSource = 'csv:' . $fileBase;
+        $defaultSource = 'csv:'.$fileBase;
 
         if (empty($lines)) {
             return ['status' => 'imported', 'rows' => 0, 'parsed' => 0, 'errors' => []];
@@ -291,7 +291,7 @@ class CalendarCsvImporter
 
         // First non-empty line is header
         $headerLine = array_shift($lines);
-        $headers = array_map(fn($h) => strtolower(trim((string) $h)), str_getcsv($headerLine));
+        $headers = array_map(fn ($h) => strtolower(trim((string) $h)), str_getcsv($headerLine));
 
         // Map header name -> index for case-insensitive lookups
         $headerMap = [];
@@ -373,13 +373,13 @@ class CalendarCsvImporter
 
             // Validate currency token: must be 3 uppercase letters (e.g. USD) or the special 'ALL'
             if ($currencyToken === null) {
-                $errors[] = ['line' => $ln + 2, 'error' => 'invalid currency: ' . ($currency ?? '')];
+                $errors[] = ['line' => $ln + 2, 'error' => 'invalid currency: '.($currency ?? '')];
 
                 continue;
             }
 
             if (strtoupper($currencyToken) !== 'ALL' && ! preg_match('/^[A-Z]{3}$/', $currencyToken)) {
-                $errors[] = ['line' => $ln + 2, 'error' => 'invalid currency: ' . $currencyToken];
+                $errors[] = ['line' => $ln + 2, 'error' => 'invalid currency: '.$currencyToken];
 
                 continue;
             }
@@ -394,7 +394,7 @@ class CalendarCsvImporter
 
                 if (! in_array($impactClean, ['Low', 'Medium', 'High'], true)) {
                     // invalid impact value -> skip row and record error
-                    $errors[] = ['line' => $ln + 2, 'error' => 'invalid impact: ' . ($impact ?? '')];
+                    $errors[] = ['line' => $ln + 2, 'error' => 'invalid impact: '.($impact ?? '')];
 
                     continue;
                 }
@@ -474,13 +474,13 @@ class CalendarCsvImporter
                             $eventTimeUtc = $dateIso;
                             $timezoneSource = 'utc_field';
                         } catch (\Throwable $e) {
-                            $errors[] = ['line' => $ln + 2, 'error' => 'invalid date (could not parse as UTC): ' . $date];
+                            $errors[] = ['line' => $ln + 2, 'error' => 'invalid date (could not parse as UTC): '.$date];
 
                             continue;
                         }
                     }
                 } catch (\Exception $e) {
-                    $errors[] = ['line' => $ln + 2, 'error' => 'invalid date: ' . $e->getMessage()];
+                    $errors[] = ['line' => $ln + 2, 'error' => 'invalid date: '.$e->getMessage()];
 
                     continue; // skip this row on parse failure
                 }
@@ -649,7 +649,7 @@ class CalendarCsvImporter
             $duplicatesFound = 0;
 
             foreach ($upsertRows as $row) {
-                $tupleKey = ($row['currency'] ?? '') . '|' . ($row['event_time_utc'] ?? '') . '|' . ($row['title'] ?? '');
+                $tupleKey = ($row['currency'] ?? '').'|'.($row['event_time_utc'] ?? '').'|'.($row['title'] ?? '');
 
                 if (! isset($seenTuples[$tupleKey])) {
                     $seenTuples[$tupleKey] = true;
@@ -688,7 +688,7 @@ class CalendarCsvImporter
                 $updated = $existingCount;
                 $created = max(0, $total - $existingCount);
             } catch (\Throwable $e) {
-                $errors[] = ['line' => '?', 'error' => 'upsert failed: ' . $e->getMessage()];
+                $errors[] = ['line' => '?', 'error' => 'upsert failed: '.$e->getMessage()];
             }
         }
 

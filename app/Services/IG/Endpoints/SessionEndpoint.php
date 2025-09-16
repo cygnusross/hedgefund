@@ -16,4 +16,23 @@ class SessionEndpoint extends BaseEndpoint
     {
         return $this->client->createSession($credentials);
     }
+
+    /**
+     * Switch to a different account.
+     *
+     * @param  string  $accountId  The account ID to switch to
+     * @param  bool  $setAsDefault  Whether to set this as the default account
+     * @return array The response from IG API
+     */
+    public function switchAccount(string $accountId, bool $setAsDefault = false): array
+    {
+        $payload = [
+            'accountId' => $accountId,
+            'defaultAccount' => $setAsDefault,
+        ];
+
+        $resp = $this->client->put('/session', $payload);
+
+        return $resp['body'] ?? [];
+    }
 }

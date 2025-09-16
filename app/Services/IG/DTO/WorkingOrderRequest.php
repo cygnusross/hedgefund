@@ -23,7 +23,7 @@ class WorkingOrderRequest
             'dealReference' => ['nullable', 'regex:/^[A-Za-z0-9_\-]{1,30}$/'],
             'direction' => ['nullable', 'in:BUY,SELL'],
             'epic' => ['required', 'string'],
-            'expiry' => ['required', 'regex:/^(\d{2}-)?[A-Z]{3}-\d{2}$|^-$|^DFB$/'],
+            'expiry' => ['nullable', 'regex:/^(\d{2}-)?[A-Z]{3}-\d{2}$|^-$|^DFB$/'],
             'forceOpen' => ['nullable', 'boolean'],
             'goodTillDate' => ['nullable', 'regex:/^(\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}|\d*)$/'],
             'guaranteedStop' => ['required', 'boolean'],

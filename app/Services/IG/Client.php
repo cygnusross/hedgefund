@@ -62,6 +62,9 @@ class Client
             $headers['X-SECURITY-TOKEN'] = $xToken;
         }
 
+        // Add account ID for spread betting account (preferred account)
+        $headers['IG-ACCOUNT-ID'] = 'Z636IW';
+
         return $headers;
     }
 
@@ -80,10 +83,70 @@ class Client
 
     public function post(string $path, array $data = [], array $headers = []): array
     {
-        $url = $this->baseUrl().'/'.ltrim($path, '/');
+        try {
+            return $this->makeRequest('post', $path, $data, $headers);
+        } catch (\Illuminate\Http\Client\RequestException $e) {
+            if ($e->response->status() === 401 && $this->shouldRetry()) {
+                if ($this->refreshSessionAndRetry('post', $path, $data, $headers)) {
+                    return $this->makeRequest('post', $path, $data, $headers);
+                }
+            }
+            throw $e;
+        }
+    }
 
-        $response = Http::withHeaders(array_merge($this->defaultHeaders(), $headers))
-            ->post($url, $data);
+    public function get(string $path, array $query = [], array $headers = []): array
+    {
+        try {
+            return $this->makeGetRequest($path, $query, $headers);
+        } catch (\Illuminate\Http\Client\RequestException $e) {
+            if ($e->response->status() === 401 && $this->shouldRetry()) {
+                if ($this->refreshSessionAndRetry('get', $path, $query, $headers)) {
+                    return $this->makeGetRequest($path, $query, $headers);
+                }
+            }
+            throw $e;
+        }
+    }
+
+    public function put(string $path, array $data = [], array $headers = []): array
+    {
+        try {
+            return $this->makePutRequest($path, $data, $headers);
+        } catch (\Illuminate\Http\Client\RequestException $e) {
+            if ($e->response->status() === 401 && $this->shouldRetry()) {
+                if ($this->refreshSessionAndRetry('put', $path, $data, $headers)) {
+                    return $this->makePutRequest($path, $data, $headers);
+                }
+            }
+            throw $e;
+        }
+    }
+
+    private function makeRequest(string $method, string $path, array $data, array $headers): array
+    {
+        $url = $this->baseUrl().'/'.ltrim($path, '/');
+        $finalHeaders = array_merge($this->defaultHeaders(), $headers);
+
+        // Add VERSION header for workingorders/otc endpoint
+        if (str_contains($path, 'workingorders/otc')) {
+            $finalHeaders['VERSION'] = '2';
+        }
+
+        \Illuminate\Support\Facades\Log::info('IG API Request', [
+            'method' => $method,
+            'url' => $url,
+            'headers' => $finalHeaders,
+            'data' => $data,
+        ]);
+
+        $response = Http::withHeaders($finalHeaders)->asJson()->post($url, $data);
+
+        \Illuminate\Support\Facades\Log::info('IG API Response', [
+            'status' => $response->status(),
+            'headers' => $response->headers(),
+            'body' => $response->body(),
+        ]);
 
         $response->throw();
 
@@ -94,12 +157,25 @@ class Client
         ];
     }
 
-    public function get(string $path, array $query = [], array $headers = []): array
+    private function makeGetRequest(string $path, array $query, array $headers): array
     {
         $url = $this->baseUrl().'/'.ltrim($path, '/');
+        $finalHeaders = array_merge($this->defaultHeaders(), $headers);
 
-        $response = Http::withHeaders(array_merge($this->defaultHeaders(), $headers))
-            ->get($url, $query);
+        \Illuminate\Support\Facades\Log::info('IG API Request', [
+            'method' => 'get',
+            'url' => $url,
+            'headers' => $finalHeaders,
+            'query' => $query,
+        ]);
+
+        $response = Http::withHeaders($finalHeaders)->get($url, $query);
+
+        \Illuminate\Support\Facades\Log::info('IG API Response', [
+            'status' => $response->status(),
+            'headers' => $response->headers(),
+            'body' => $response->body(),
+        ]);
 
         $response->throw();
 
@@ -107,6 +183,87 @@ class Client
             'headers' => $this->extractResponseHeaders($response),
             'body' => $response->json(),
             'status' => $response->status(),
+        ];
+    }
+
+    private function makePutRequest(string $path, array $data, array $headers): array
+    {
+        $url = $this->baseUrl().'/'.ltrim($path, '/');
+        $finalHeaders = array_merge($this->defaultHeaders(), $headers);
+
+        \Illuminate\Support\Facades\Log::info('IG API Request', [
+            'method' => 'put',
+            'url' => $url,
+            'headers' => $finalHeaders,
+            'data' => $data,
+        ]);
+
+        $response = Http::withHeaders($finalHeaders)->asJson()->put($url, $data);
+
+        \Illuminate\Support\Facades\Log::info('IG API Response', [
+            'status' => $response->status(),
+            'headers' => $response->headers(),
+            'body' => $response->body(),
+        ]);
+
+        $response->throw();
+
+        return [
+            'headers' => $this->extractResponseHeaders($response),
+            'body' => $response->json(),
+            'status' => $response->status(),
+        ];
+    }
+
+    private function shouldRetry(): bool
+    {
+        return (int) data_get($this->config, 'retry.attempts', 1) > 0;
+    }
+
+    private function refreshSessionAndRetry(string $method, string $path, $params, array $headers): bool
+    {
+        $credentials = $this->getCredentialsFromConfig();
+        if (! $credentials) {
+            return false;
+        }
+
+        try {
+            $this->createSession($credentials);
+
+            // Add small delay before retry to allow session to propagate
+            $delay = (int) data_get($this->config, 'retry.delay', 100);
+            usleep($delay * 1000);
+
+            return true;
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('IG session refresh failed', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
+    private function getCredentialsFromConfig(): ?array
+    {
+        $demoActive = data_get($this->config, 'demo.active', true);
+
+        if ($demoActive) {
+            $identifier = data_get($this->config, 'demo.username');
+            $password = data_get($this->config, 'demo.password');
+        } else {
+            $identifier = data_get($this->config, 'username');
+            $password = data_get($this->config, 'password');
+        }
+
+        if (empty($identifier) || empty($password)) {
+            return null;
+        }
+
+        return [
+            'identifier' => $identifier,
+            'password' => $password,
+            'encryptedPassword' => false,
         ];
     }
 
