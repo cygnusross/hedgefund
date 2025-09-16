@@ -8,10 +8,8 @@ use App\Application\News\NewsService;
 use Carbon\Carbon;
 use Illuminate\Cache\Repository;
 
-use function Pest\Laravel\mock;
-
 beforeEach(function () {
-    $this->cache = mock(Repository::class);
+    $this->cache = Mockery::mock(Repository::class);
     $this->service = new NewsService($this->cache);
 });
 
@@ -28,14 +26,16 @@ it('returns cached data when available', function () {
         'source' => 'forexnewsapi',
     ];
 
-    $this->cache->shouldReceive('get')
+    $this->cache
+        ->shouldReceive('get')
         ->once()
         ->with($cacheKey)
         ->andReturn($cachedPayload);
 
     $result = $this->service->getNews($pair, $date);
 
-    expect($result)->toBeInstanceOf(NewsData::class)
+    expect($result)
+        ->toBeInstanceOf(NewsData::class)
         ->and($result->rawScore)->toBe(0.55)
         ->and($result->strength)->toBe(0.8)
         ->and($result->counts)->toBe(['pos' => 75, 'neg' => 20, 'neu' => 5])
@@ -57,13 +57,15 @@ it('normalizes pair format correctly', function () {
         'source' => 'forexnewsapi',
     ];
 
-    $this->cache->shouldReceive('get')
+    $this->cache
+        ->shouldReceive('get')
         ->once()
         ->with($cacheKey)
         ->andReturn($cachedPayload);
 
     $result = $this->service->getNews($pair, $date);
 
-    expect($result)->toBeInstanceOf(NewsData::class)
+    expect($result)
+        ->toBeInstanceOf(NewsData::class)
         ->and($result->pair)->toBe('EUR/USD'); // Original format preserved
 });

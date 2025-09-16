@@ -31,10 +31,9 @@ it('context builder reads todays news stat from DB', function () {
 
     // Build a minimal context: construct required dependencies via container resolution
     $updater = app()->make(App\Application\Candles\CandleUpdaterContract::class);
-    $news = app()->make(App\Application\News\NewsAggregator::class);
     $calendar = app()->make(App\Application\Calendar\CalendarLookup::class);
 
-    $cb = new ContextBuilder($updater, $news, $calendar);
+    $cb = new ContextBuilder($updater, $calendar);
     $ctx = $cb->build($pair, new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
 
     expect($ctx)->toBeArray();

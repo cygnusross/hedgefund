@@ -21,7 +21,11 @@ use Illuminate\Support\Str;
  */
 class CalendarCsvImporter
 {
-    public function __construct(protected Filesystem $files) {}
+    public function __construct(
+        protected Filesystem $files
+    ) {
+        // No additional setup required
+    }
 
     // No country->timezone lookup — CSV dates are assumed to be UTC or have offsets.
 
@@ -35,38 +39,36 @@ class CalendarCsvImporter
         $currency = $payload['currency'] ?? null;
         $time = $payload['event_time_utc'] ?? null;
 
-        if (empty($title) || empty($currency) || empty($time)) {
+        if (! $title || ! $currency || ! $time) {
             return null;
         }
 
         try {
-            $candidates = CalendarEvent::where('currency', $currency)
-                ->where('title', $title)
-                ->get();
-
             $payloadTime = null;
             try {
                 $payloadTime = new CarbonImmutable($time);
-            } catch (\Throwable $e) {
-                $payloadTime = null;
+            } catch (\Throwable) {
+                return null;
             }
+
+            $candidates = CalendarEvent::where('currency', $currency)
+                ->where('title', $title)
+                ->get();
 
             foreach ($candidates as $cand) {
                 if (empty($cand->event_time_utc)) {
                     continue;
                 }
-
                 try {
                     $candTime = new CarbonImmutable($cand->event_time_utc);
-                } catch (\Throwable $e) {
+                } catch (\Throwable) {
                     continue;
                 }
-
-                if ($payloadTime instanceof CarbonImmutable && $candTime->equalTo($payloadTime)) {
+                if ($candTime->equalTo($payloadTime)) {
                     return $cand;
                 }
             }
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
             // ignore and return null
         }
 

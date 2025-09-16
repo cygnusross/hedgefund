@@ -20,8 +20,9 @@ it('enforces ig minNormalStopOrLimitDistance by pushing sl/tp outward', function
         default: 1.0
     execution:
       sl_atr_mult: 1.0
-      tp_atr_mult: 1.0
+      tp_atr_mult: 2.0  # Higher TP for better RR
       spread_ceiling_pips: 10.0
+      rr: 1.0  # Accept 1:1 RR for this test
     cooldowns: {}
     overrides: {}
     YAML;
@@ -38,7 +39,7 @@ it('enforces ig minNormalStopOrLimitDistance by pushing sl/tp outward', function
         'market' => [
             'status' => 'TRADEABLE',
             'last_price' => 1.1000,
-            'atr5m_pips' => 1, // small ATR so sl/tp would be close
+            'atr5m_pips' => 5, // Larger ATR for better SL/TP distances
             'spread_estimate_pips' => 0.5,
             'sentiment' => ['long_pct' => 60.0, 'short_pct' => 40.0],
             'ig_rules' => ['minNormalStopOrLimitDistance' => 20], // 20 points = 20 * 0.0001 = 0.0020

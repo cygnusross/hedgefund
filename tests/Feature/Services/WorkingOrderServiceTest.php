@@ -8,10 +8,32 @@ use App\Services\IG\Client;
 use App\Services\IG\Endpoints\WorkingOrdersOtcEndpoint;
 use App\Services\IG\WorkingOrderService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    // Mock IG API HTTP calls to prevent real API requests
+    Http::fake([
+        'https://demo-api.ig.com/*' => Http::response([
+            'snapshot' => [
+                'bid' => 11750, // Raw format (1.1750)
+                'offer' => 11755, // Raw format (1.1755)
+                'netChange' => 0.0005,
+                'pctChange' => 0.0042,
+                'updateTime' => '10:30:00',
+                'delayTime' => 0,
+                'marketStatus' => 'TRADEABLE',
+            ],
+            'dealingRules' => [
+                'minStepDistance' => ['value' => 5, 'unit' => 'POINTS'],
+                'minDealSize' => ['value' => 0.5, 'unit' => 'AMOUNT'],
+                'minControlledRiskStopDistance' => ['value' => 10, 'unit' => 'POINTS'],
+                'minNormalStopOrLimitDistance' => ['value' => 8, 'unit' => 'POINTS'],
+            ],
+        ], 200),
+    ]);
+
     // Create test markets
     Market::create([
         'name' => 'EUR/USD',
@@ -53,9 +75,11 @@ test('creates working order from decision successfully', function () {
         ->once()
         ->withArgs(function ($payload) {
             expect($payload['direction'])->toBe('BUY');
-            expect($payload['epic'])->toBe('CS.D.EURUSD.TODAY.IP'); // Updated epic
-            expect($payload)->toHaveKey('stopDistance'); // Now uses distances instead of levels
+            expect($payload['epic'])->toBe('CS.D.EURUSD.TODAY.IP');
+            expect($payload)->toHaveKey('stopDistance');
             expect($payload)->toHaveKey('limitDistance');
+            expect($payload['level'])->toBeNumeric(); // Level is now in IG raw format (integer)
+            expect($payload['size'])->toBe(0.5);
 
             return true;
         })
@@ -101,7 +125,7 @@ test('creates working order with raw data successfully', function () {
         'direction' => 'SELL',
         'epic' => 'CS.D.GBPUSD.MINI.IP',
         'guaranteedStop' => false,
-        'level' => 1.2500,
+        'level' => 12500, // Raw IG format (integer, not decimal)
         'size' => 1.0,
         'stopDistance' => 15,
         'limitDistance' => 30,

@@ -1,6 +1,9 @@
 <?php
 
 use App\Application\ContextBuilder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+uses(RefreshDatabase::class);
 
 it('includes sentiment in market context when provider returns 70/30', function () {
     $testClient = new class([]) extends \App\Services\IG\Client
@@ -64,7 +67,7 @@ it('includes sentiment in market context when provider returns 70/30', function 
 
     $calendar = new \App\Application\Calendar\CalendarLookup($calendarProvider);
 
-    $cb = new ContextBuilder($updater, $news, $calendar, null, $provider);
+    $cb = new ContextBuilder($updater, $calendar, null, $provider);
 
     $ts = new DateTimeImmutable('now', new DateTimeZone('UTC'));
     $res = $cb->build('EUR/USD', $ts);

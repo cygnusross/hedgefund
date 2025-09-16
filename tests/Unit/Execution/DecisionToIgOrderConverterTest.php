@@ -5,10 +5,31 @@ declare(strict_types=1);
 use App\Domain\Execution\DecisionToIgOrderConverter;
 use App\Models\Market;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 
 uses(Tests\TestCase::class, RefreshDatabase::class);
 
 beforeEach(function () {
+    // Mock IG API HTTP calls to prevent real API requests
+    Http::fake([
+        'https://demo-api.ig.com/*' => Http::response([
+            'snapshot' => [
+                'bid' => 11750, // Raw format (1.1750)
+                'offer' => 11755, // Raw format (1.1755)
+                'netChange' => 0.0005,
+                'pctChange' => 0.0042,
+                'updateTime' => '10:30:00',
+                'delayTime' => 0,
+                'marketStatus' => 'TRADEABLE',
+            ],
+            'dealingRules' => [
+                'minStepDistance' => ['value' => 5, 'unit' => 'POINTS'],
+                'minDealSize' => ['value' => 0.5, 'unit' => 'AMOUNT'],
+                'minControlledRiskStopDistance' => ['value' => 10, 'unit' => 'POINTS'],
+                'minNormalStopOrLimitDistance' => ['value' => 8, 'unit' => 'POINTS'],
+            ],
+        ], 200),
+    ]);
     // Create test markets
     Market::create([
         'symbol' => 'EUR/USD',

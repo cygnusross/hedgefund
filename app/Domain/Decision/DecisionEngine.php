@@ -418,16 +418,23 @@ final class DecisionEngine
 
         // CRITICAL: Enforce minimum stop loss for margin safety (prevents margin rejection)
         $slMinPips = (float) $rules->getExecution('sl_min_pips', 15.0);
+        $originalSlPips = $slPips;
         $slPips = max($slPips, $slMinPips);
 
         $tpPips = max(1e-6, $tpMult * $atrP);
+
+        // If SL was increased due to minimum requirements, adjust TP proportionally to maintain RR
+        if ($slPips > $originalSlPips) {
+            $adjustmentRatio = $slPips / $originalSlPips;
+            $tpPips = $tpPips * $adjustmentRatio;
+        }
 
         $pairNorm = data_get($ctx, 'meta.pair_norm') ?? data_get($ctx, 'meta.pair') ?? '';
         $pairNormStr = (string) $pairNorm;
         $normForPip = strtoupper($pairNormStr);
         // If pair is provided without a delimiter (e.g. 'USDJPY'), insert a slash between base/quote
         if (strpos($normForPip, '/') === false && strpos($normForPip, '-') === false && strlen($normForPip) >= 6) {
-            $normForPip = substr($normForPip, 0, 3).'/'.substr($normForPip, 3);
+            $normForPip = substr($normForPip, 0, 3) . '/' . substr($normForPip, 3);
         }
 
         $pipSize = \App\Domain\FX\PipMath::pipSize($normForPip ?: '');
@@ -447,23 +454,6 @@ final class DecisionEngine
             $entry = $last;
             $sl = 0.0;
             $tp = 0.0;
-        }
-
-        // CRITICAL: Risk-Reward validation - enforce minimum RR ratio
-        if ($proposedAction !== 'hold') {
-            $actualRiskPips = abs($entry - $sl) / $pipSize;
-            $actualRewardPips = abs($tp - $entry) / $pipSize;
-
-            if ($actualRiskPips > 0) {
-                $actualRR = $actualRewardPips / $actualRiskPips;
-                $minRR = (float) $rules->getExecution('rr', 1.8);
-
-                if ($actualRR < $minRR) {
-                    $reasons[] = 'poor_risk_reward';
-
-                    return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
-                }
-            }
         }
 
         // CRITICAL: Resistance/Support proximity filter
@@ -504,7 +494,7 @@ final class DecisionEngine
         // Round levels to tick size and enforce broker rules if present
         $normPair = strtoupper((string) ($pairNormStr));
         if (strpos($normPair, '/') === false && strpos($normPair, '-') === false && strlen($normPair) >= 6) {
-            $normPair = substr($normPair, 0, 3).'/'.substr($normPair, 3);
+            $normPair = substr($normPair, 0, 3) . '/' . substr($normPair, 3);
         }
 
         $tick = \App\Domain\FX\PipMath::tickSize($normPair ?: '');
@@ -531,6 +521,23 @@ final class DecisionEngine
             $entry = $roundToTick($entry);
             $sl = $roundToTick($sl);
             $tp = $roundToTick($tp);
+        }
+
+        // CRITICAL: Risk-Reward validation - enforce minimum RR ratio (after IG adjustments)
+        if ($proposedAction !== 'hold') {
+            $actualRiskPips = abs($entry - $sl) / $pipSize;
+            $actualRewardPips = abs($tp - $entry) / $pipSize;
+
+            if ($actualRiskPips > 0) {
+                $actualRR = $actualRewardPips / $actualRiskPips;
+                $minRR = (float) $rules->getExecution('rr', 1.8);
+
+                if ($actualRR < $minRR) {
+                    $reasons[] = 'poor_risk_reward';
+
+                    return ['action' => 'hold', 'confidence' => 0.0, 'reasons' => $reasons, 'blocked' => true];
+                }
+            }
         }
 
         $reasons[] = 'ok';

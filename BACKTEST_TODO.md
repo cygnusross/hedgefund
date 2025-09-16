@@ -1,353 +1,183 @@
-# Backtesting MVP Implementation TODO
+# Backtesting MVP Implementation TODO / Developer Task List
 
-## 📋 Current Status Assessment
-
-✅ **Historical Data Foundation Complete**
-
--   Candle data: 3 years of 5min/30min OHLC (market hours only)
--   Economic calendar: High-impact events stored
--   News sentiment: Historical data available
--   Spread history: Collection system active (going forward)
-
-✅ **Core Trading Logic Complete**
-
--   DecisionEngine: Gates, rules, sizing, safety checks
--   FeatureEngine: EMA, ATR, ADX, support/resistance
--   ContextBuilder: Aggregates market data, features, news
-
-❌ **Missing: Historical Data Integration**
+This file is a **Copilot-friendly backlog** for implementing the backtest engine. Each task is structured with `- [ ]` checkboxes, file paths, and code expectations so that AI coding assistants can generate implementations.
 
 ---
 
-## 🚨 **API Separation Strategy**
+## 📋 Setup Contracts
 
-**Problem**: Current `ContextBuilder` dependencies hit live APIs that would be problematic for thousands of backtesting simulations:
+-   [ ] Create `app/Contracts/CandleProviderContract.php`
 
-### ❌ **Live API Dependencies (Must Replace):**
+```php
+namespace App\Contracts;
 
--   **CandleUpdater** → TwelveData API (rate limits, costs)
--   **SpreadEstimator** → IG API for current spreads (live only)
--   **ClientSentimentProvider** → IG API for current sentiment (live only)
+interface CandleProviderContract {
+    public function getCandles(string $symbol, \DateTime $from, \DateTime $to, string $interval): array;
+}
 
-### ✅ **Database-Backed (Safe for Backtesting):**
+	•	Create app/Contracts/SpreadProviderContract.php
 
--   **NewsAggregator** → Queries `NewsStat` model first, API fallback
--   **CalendarLookup** → Queries `CalendarEvent` model (historical data)
+namespace App\Contracts;
 
-### 🔄 **Hybrid (Store + API Fallback Pattern):**
+interface SpreadProviderContract {
+    public function getSpread(string $symbol, \DateTime $at): float;
+}
 
--   **ClientSentimentProvider** → Should store hourly snapshots to `client_sentiment` table (like spreads)
--   **SpreadEstimator** → Already stores hourly snapshots to `spreads` table via `spreads:record-current` command
+	•	Create app/Contracts/SentimentProviderContract.php
 
-### 💾 **Storage Strategy:**
+namespace App\Contracts;
 
--   **Spreads**: `spreads:record-current` runs hourly during trading hours (07:00-22:00 London)
--   **Client Sentiment**: Need `sentiment:record-current` with same schedule pattern
--   **Live Trading**: Use live APIs for real-time decisions
--   **Backtesting**: Query stored snapshots for consistent historical data
+interface SentimentProviderContract {
+    public function getSentiment(string $symbol, \DateTime $at): float;
+}
 
-### 🎭 **Data Availability & Mocking Strategy:**
 
--   **Historical Data Available**: Use actual stored spreads/sentiment from database
--   **Historical Data Missing**: Generate deterministic mock data for consistent backtesting
--   **Mock Spread Strategy**: Use `PipMath::spreadEstimatePips()` conservative defaults (EUR/USD: 0.8 pips)
--   **Mock Sentiment Strategy**: Generate neutral sentiment (50/50 long/short) or pair-specific patterns
--   **Consistency**: Same mock data for same timestamp ensures reproducible backtest results
+⸻
 
-### 🔄 **Backtesting Isolation Strategy:**
+🏗 Implement Historical Providers
+	•	Create app/Infrastructure/Backtest/HistoricalCandleRepository.php
 
--   **Mock Trades**: Store hypothetical orders/positions in Redis cache with backtest session ID
--   **Cache Keys**: `backtest:{session_id}:positions`, `backtest:{session_id}:orders`
--   **No DB Pollution**: Zero impact on production `orders` and position tracking tables
--   **Results Storage**: Dedicated `backtest_results` table for performance analysis
--   **Session Management**: Each backtest gets unique ID for complete isolation
--   **Cleanup**: Automatic Redis cleanup after backtest completion
+namespace App\Infrastructure\Backtest;
 
-### 🎯 **Solution:**
+use App\Contracts\CandleProviderContract;
+use App\Models\Candle;
 
--   **Live Trading**: Use existing IG API providers for real-time data
--   **Backtesting**: Use historical database providers for consistent simulation
--   **Same Logic**: `DecisionEngine`, `FeatureEngine`, rules unchanged
+class HistoricalCandleRepository implements CandleProviderContract {
+    public function getCandles(string $symbol, \DateTime $from, \DateTime $to, string $interval): array {
+        return Candle::where('symbol', $symbol)
+            ->whereBetween('timestamp', [$from, $to])
+            ->where('interval', $interval)
+            ->orderBy('timestamp')
+            ->get()
+            ->toArray();
+    }
+}
 
----
+	•	Create app/Infrastructure/Backtest/HistoricalSpreadProvider.php
 
-## 🎯 Phase 1: Core Backtesting Infrastructure (MVP)
+namespace App\Infrastructure\Backtest;
 
-### 1.1 Historical Data Providers (CRITICAL)
+use App\Contracts\SpreadProviderContract;
+use App\Models\Spread;
 
-**Priority: CRITICAL**
+class HistoricalSpreadProvider implements SpreadProviderContract {
+    public function getSpread(string $symbol, \DateTime $at): float {
+        return Spread::where('symbol', $symbol)
+            ->where('timestamp', '<=', $at)
+            ->orderByDesc('timestamp')
+            ->value('spread') ?? 0.0;
+    }
+}
 
--   [ ] Create `HistoricalCandleUpdater` implementing `CandleUpdaterContract`
--   [ ] Create `HistoricalSpreadEstimator` implementing `SpreadEstimator` interface
--   [ ] Create `MockClientSentimentProvider` for consistent backtest sentiment
--   [ ] Query database instead of hitting live APIs (TwelveData, IG)
--   [ ] **Data Fallbacks**: When historical data missing, use deterministic mocks
--   [ ] **Spread Fallback**: Use `PipMath::spreadEstimatePips()` conservative defaults
--   [ ] **Sentiment Fallback**: Generate neutral 50/50 or deterministic patterns
--   [ ] **Reuse**: `NewsAggregator` already DB-first, `CalendarLookup` already DB-backed
--   [ ] **Files**:
-    -   `app/Application/Candles/HistoricalCandleUpdater.php`
-    -   `app/Domain/FX/HistoricalSpreadEstimator.php`
-    -   `app/Services/IG/MockClientSentimentProvider.php`
--   [ ] **Tests**: Unit tests for each historical provider
+	•	Create app/Infrastructure/Backtest/HistoricalSentimentProvider.php
 
-### 1.2 Backtest Command Foundation
+namespace App\Infrastructure\Backtest;
 
-**Priority: HIGH**
+use App\Contracts\SentimentProviderContract;
+use App\Models\NewsStat;
 
--   [ ] Create `trading:backtest` Artisan command
--   [ ] Add parameters: `{pair} {--from=} {--to=} {--interval=5min}`
--   [ ] Inject historical providers into existing `ContextBuilder`
--   [ ] **API Separation**: Use historical spreads for backtest, live IG API for production
--   [ ] **Files**: `app/Console/Commands/TradingBacktest.php`
--   [ ] **Tests**: `tests/Feature/Console/TradingBacktestTest.php`### 1.3 Historical Decision Execution
+class HistoricalSentimentProvider implements SentimentProviderContract {
+    public function getSentiment(string $symbol, \DateTime $at): float {
+        return NewsStat::where('symbol', $symbol)
+            ->where('timestamp', '<=', $at)
+            ->orderByDesc('timestamp')
+            ->value('sentiment') ?? 0.0;
+    }
+}
 
-**Priority: HIGH**
 
--   [ ] Loop through date range, building context at each timestamp
--   [ ] **Reuse**: Existing `ContextBuilder->build()` method unchanged
--   [ ] **Reuse**: Existing `DecisionEngine->decide()` method unchanged
--   [ ] **API Safety**: No live API calls during backtesting (spreads from DB, sentiment mocked)
--   [ ] **Position Tracking**: Mock trades/orders in Redis cache (no DB pollution)
--   [ ] **Results Storage**: Separate `backtest_results` table for analysis
--   [ ] Track hypothetical positions and P&L
--   [ ] **Integration**: Zero changes to core trading logic
+⸻
 
----
+🔄 ContextBuilder Refactor
+	•	Update app/Application/ContextBuilder.php to accept providers via constructor.
 
-## 🎯 Phase 2: Essential Backtesting Features
+public function __construct(
+    private readonly CandleProviderContract $candleProvider,
+    private readonly SpreadProviderContract $spreadProvider,
+    private readonly SentimentProviderContract $sentimentProvider
+) {}
 
-### 2.1 Position & P&L Tracking
 
-**Priority: MEDIUM**
+⸻
 
--   [ ] Create `BacktestPosition` value object
--   [ ] Create `BacktestPositionLedger` using Redis for session isolation
--   [ ] Implement position sizing using existing logic
--   [ ] Calculate P&L with spread costs
--   [ ] Track drawdown and win/loss ratios
--   [ ] **Files**: `app/Domain/Backtesting/BacktestPosition.php`, `app/Domain/Backtesting/BacktestPositionLedger.php`
+🧪 Backtest Engine
+	•	Create app/Backtest/SimulationRunner.php
 
-### 2.2 Backtest Results Storage
+namespace App\Backtest;
 
-**Priority: MEDIUM**
+use App\Application\ContextBuilder;
 
--   [ ] Create `backtest_results` table migration
--   [ ] Create `BacktestResult` model for storing completed backtest summaries
--   [ ] Store: session_id, pair, date_range, total_return, win_rate, max_drawdown, trade_count
--   [ ] **Files**: `database/migrations/*_create_backtest_results_table.php`, `app/Models/BacktestResult.php`
+class SimulationRunner {
+    public function __construct(private readonly ContextBuilder $contextBuilder) {}
 
-### 2.3 Basic Reporting
+    public function run(string $symbol, \DateTime $from, \DateTime $to): array {
+        $results = [];
+        $period = new \DatePeriod($from, new \DateInterval('P1D'), $to);
 
-**Priority: MEDIUM**
+        foreach ($period as $day) {
+            // Load from cache or DB
+            $context = $this->contextBuilder->build($symbol, $day);
 
--   [ ] Generate summary statistics (total return, Sharpe ratio, max drawdown)
--   [ ] Show key trades and decision points
--   [ ] Display performance by time period
--   [ ] Export results to JSON/CSV
--   [ ] **Files**: `app/Domain/Backtesting/BacktestReport.php`
+            // Run DecisionEngine as if live trading that day
+            $dayResults = $this->simulateDay($context);
+            $results[$day->format('Y-m-d')] = $dayResults;
+        }
 
-### 2.4 Enhanced Preview Commands
+        return $results;
+    }
 
-**Priority: LOW**
+    private function simulateDay($context): array {
+        // TODO: integrate with DecisionEngine & TradeReplayer
+        return [
+            'pnl' => 0.0,
+            'trades' => [],
+        ];
+    }
+}
 
--   [ ] Add `--date` parameter to `context:preview`
--   [ ] Add `--date` parameter to `decision:preview`
--   [ ] Enable historical context inspection
--   [ ] **Modification**: Update existing preview commands
+	•	Create app/Backtest/TradeReplayer.php
 
----
+namespace App\Backtest;
 
-## 🎯 Phase 3: Performance & Polish
+class TradeReplayer {
+    public function replay(array $candles, array $orders): array {
+        // TODO: execute trades against candle history
+        return [];
+    }
+}
 
-### 3.1 Performance Optimization
+	•	Create app/Backtest/ResultAggregator.php
 
-**Priority: LOW**
+namespace App\Backtest;
 
--   [ ] Add database indexes for backtest queries
--   [ ] Implement chunk processing for large date ranges
--   [ ] Add caching for repeated calculations
--   [ ] Memory optimization for long backtests
+class ResultAggregator {
+    public function aggregate(array $dailyResults): array {
+        // TODO: compile P&L, risk, and trade stats
+        return [];
+    }
+}
 
-### 3.2 Validation & Error Handling
 
-**Priority: LOW**
+⸻
 
--   [ ] Validate sufficient historical data exists
--   [ ] Handle missing data gracefully (holidays, weekends)
--   [ ] Add comprehensive error messages
--   [ ] Implement resume functionality for interrupted backtests
+⚡ Caching Strategy
+	•	Preload candles, spreads, events, and news into memory before running backtest.
 
----
+$candles = Candle::where('symbol', $symbol)
+    ->whereBetween('timestamp', [$from, $to])
+    ->orderBy('timestamp')
+    ->get()
+    ->groupBy(fn($c) => $c->timestamp->toDateString());
 
-## � **Iterative Strategy Testing Workflow**
+	•	Use cache (Laravel Cache or arrays) for day-by-day replay instead of repeated DB queries.
 
-### **Rapid Rule Testing Cycle:**
+⸻
 
-```bash
-# 1. Run backtest with current rules
-php artisan trading:backtest USD/JPY --from="2023-01-01" --to="2023-12-31"
-# → Processes hundreds of decisions in Redis cache
-# → Records final results to backtest_results table
+✅ End-to-End Test
+	•	Write a feature test that runs SimulationRunner for 1 month of data and asserts non-empty results.
 
-# 2. Analyze results
-php artisan backtest:results --latest
-# → Shows: Win rate: 45%, Total return: -5.2%, Max drawdown: 12%
-
-# 3. Tweak rules (adjust gates, confluence, risk settings)
-php artisan rules:reload
-
-# 4. Run again with tweaked rules
-php artisan trading:backtest USD/JPY --from="2023-01-01" --to="2023-12-31"
-# → New session ID, fresh Redis cache
-# → Compare results: Win rate: 67%, Total return: +12.5%, Max drawdown: 8%
-
-# 5. Compare multiple runs
-php artisan backtest:compare --sessions="abc123,def456"
-```
-
-### **Benefits:**
-
--   ✅ **Fast Iteration**: Redis cache = thousands of decisions per minute
--   ✅ **Rule Experimentation**: Tweak gates, risk, confluence settings rapidly
--   ✅ **Results Comparison**: Compare different rule configurations side-by-side
--   ✅ **Zero Risk**: No production data pollution, pure historical simulation
--   ✅ **Reproducible**: Same rules + same data = identical results every time
-
----
-
-## �📊 Implementation Strategy
-
-### Step 1: Proof of Concept (1-2 hours)
-
-```bash
-# Create historical candle updater (implements existing contract)
-php artisan make:class Application/Candles/HistoricalCandleUpdater
-
-# Create basic backtest command
-php artisan make:command TradingBacktest
-
-# Test with small date range (1 day) - reuses ALL existing logic
-php artisan trading:backtest EUR/USD --from="2023-08-29" --to="2023-08-30"
-```
-
-### Step 2: Core Integration (2-3 hours)
-
--   Wire historical providers into existing ContextBuilder
--   **Critical**: Verify zero live API calls during backtesting
--   **Spread Strategy**: Use historical spread data from database for backtests
--   **Sentiment Strategy**: Use consistent/mocked sentiment for deterministic results
--   Implement position tracking and basic P&L
--   Test with 1-week backtest
-
-### Step 3: MVP Complete (1-2 hours)
-
--   Add reporting and summary statistics
--   Comprehensive testing and error handling
--   Documentation and usage examples
-
----
-
-## 🧪 Testing Strategy
-
-### Essential Tests
-
--   [ ] Unit tests for `HistoricalCandleUpdater` (implements CandleUpdaterContract)
--   [ ] Unit tests for `HistoricalSpreadEstimator` (no live IG API calls)
--   [ ] Integration tests ensuring ContextBuilder works with all historical providers
--   [ ] Feature tests for backtest command with real historical data
--   [ ] **Critical**: Verify zero external API calls during backtesting simulation
--   [ ] Verify same DecisionEngine results between live and backtest modes (with same data)
-
-### Test Data Requirements
-
--   Use existing USD/JPY historical data (2022-2023)
--   Mock spread data for consistent P&L calculations
--   Test edge cases: market gaps, low volume periods
-
----
-
-## 🎯 Success Criteria (MVP)
-
-**Core Functionality:**
-
--   [ ] Run backtest on historical data without hitting live APIs
--   [ ] Generate buy/sell decisions using existing DecisionEngine logic
--   [ ] Calculate realistic P&L including spread costs
--   [ ] Display basic performance metrics
-
-**Command Usage:**
-
-```bash
-# Single backtest run
-php artisan trading:backtest USD/JPY --from="2023-01-01" --to="2023-12-31"
-# Output: Session: abc123 | Total trades: 45, Win rate: 67%, Total return: +12.5%
-
-# Rule optimization workflow
-php artisan rules:reload                    # Load new rule tweaks
-php artisan trading:backtest USD/JPY --from="2023-01-01" --to="2023-12-31"
-php artisan backtest:results --latest       # Compare with previous runs
-```
-
-**Integration Proof:**
-
--   [ ] Same decision logic as live trading
--   [ ] Historical context matches live context generation
--   [ ] Spreads and costs properly applied
--   [ ] Results are deterministic and repeatable
-
----
-
-## 📋 File Structure
+$runner = new SimulationRunner($contextBuilder);
+$results = $runner->run("EURUSD", new \DateTime("2022-01-01"), new \DateTime("2022-02-01"));
+$this->assertNotEmpty($results);
 
 ```
-app/
-├── Console/Commands/
-│   └── TradingBacktest.php
-├── Application/Candles/
-│   └── HistoricalCandleUpdater.php  # Implements CandleUpdaterContract
-├── Domain/Backtesting/
-│   ├── BacktestPosition.php
-│   ├── BacktestPositionLedger.php   # Redis-based position tracking
-│   ├── BacktestReport.php
-│   └── BacktestEngine.php
-├── Models/
-│   └── BacktestResult.php           # Stores completed backtest summaries
-
-database/migrations/
-└── *_create_backtest_results_table.php
-
-tests/
-├── Feature/Console/
-│   └── TradingBacktestTest.php
-├── Unit/Application/Candles/
-│   └── HistoricalCandleUpdaterTest.php
-```
-
----
-
-## ⚡ Quick Start Commands
-
-```bash
-# Generate required files
-php artisan make:class Application/Candles/HistoricalCandleUpdater --no-interaction
-php artisan make:command TradingBacktest --no-interaction
-php artisan make:test Feature/Console/TradingBacktestTest --pest --no-interaction
-
-# Run focused tests during development
-php artisan test --filter=TradingBacktest
-
-# Format code
-vendor/bin/pint --dirty
-```
-
-## 🎯 Key Architecture Insight
-
-**Reuse Existing Services**: The current `ContextBuilder` already uses dependency injection perfectly. We just need to swap out the `CandleUpdaterContract` implementation from live API calls to database queries. This means:
-
-✅ **Zero changes** to `DecisionEngine`, `FeatureEngine`, `NewsAggregator`, `CalendarLookup`  
-✅ **Zero changes** to existing trading logic, rules, gates, safety checks  
-✅ **Same exact results** between live trading and backtesting  
-✅ **Minimal code duplication** - just one new class implementing existing contract
-
-This approach leverages your existing architecture perfectly and avoids duplicating any business logic.

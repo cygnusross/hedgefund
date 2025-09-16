@@ -58,19 +58,20 @@ it('caches API responses during ingest operations', function () {
     $cacheKey = NewsCacheKeyStrategy::statKey($pair, $date);
     expect(Cache::has($cacheKey))->toBeFalse();
 
-    // First call should hit API and cache the result
+    // First call should hit API and cache the result temporarily
     $result1 = $ingestor->ingest($pair, $date);
     expect($apiCallCount)->toBe(1);
     expect($result1)->toBeInstanceOf(NewsStat::class);
     expect($result1->raw_score)->toBe(0.5);
 
-    // Verify cache key now exists
-    expect(Cache::has($cacheKey))->toBeTrue();
-
-    // Verify cached data matches expected format
-    $cached = Cache::get($cacheKey);
-    expect($cached)->toBeArray();
-    expect($cached['raw_score'])->toBe(0.5);
+    // NOTE: The stat cache key is intentionally cleared after ingest to ensure
+    // ContextBuilder gets fresh data from DB, so we can't test for cache persistence here.
+    // Instead verify the data was persisted to database
+    $persisted = NewsStat::where('pair_norm', 'EUR-USD')
+        ->whereDate('stat_date', $date)
+        ->first();
+    expect($persisted)->not->toBeNull();
+    expect($persisted->raw_score)->toBe(0.5);
 
     // Second call should use cache, not hit API
     // Use different date to avoid DB constraint issues
@@ -230,14 +231,18 @@ it('logs cache operations for debugging', function () {
     // First call should hit API (cache miss)
     $ingestor->ingest($pair, $date);
     expect($fetchStatsCalled)->toBeTrue();
+
+    // NOTE: The stat cache key is cleared after ingest, so test DB persistence instead
+    $persisted = NewsStat::where('pair_norm', 'AUD-USD')
+        ->whereDate('stat_date', $date)
+        ->first();
+    expect($persisted)->not->toBeNull();
+    expect($persisted->raw_score)->toBe(0.2);
+
+    // Test manual cache invalidation - first put something in cache to invalidate
+    Cache::put($cacheKey, ['test' => 'data'], 3600);
     expect(Cache::has($cacheKey))->toBeTrue();
 
-    // Test cache retrieval functionality
-    $cached = $ingestor->getCachedNewsJson($pair, $date);
-    expect($cached)->toBeArray();
-    expect($cached['raw_score'])->toBe(0.2);
-
-    // Test manual cache invalidation
     $result = $ingestor->invalidateCache($pair, $date);
     expect($result)->toBeTrue();
     expect(Cache::has($cacheKey))->toBeFalse();

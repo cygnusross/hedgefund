@@ -1,6 +1,9 @@
 <?php
 
 use App\Application\ContextBuilder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+uses(RefreshDatabase::class);
 
 it('includes sentiment in the market context when provider returns data', function () {
     // Build a test client that returns deterministic sentiment for endpoint
@@ -66,7 +69,7 @@ it('includes sentiment in the market context when provider returns data', functi
 
     $calendar = new \App\Application\Calendar\CalendarLookup($calendarProvider);
 
-    $cb = new ContextBuilder($updater, $news, $calendar, null, $provider);
+    $cb = new ContextBuilder($updater, $calendar, null, $provider);
 
     $ts = new DateTimeImmutable('now', new DateTimeZone('UTC'));
     // Call build — we won't exercise the full pipeline; ensure it doesn't throw and returns array

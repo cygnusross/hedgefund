@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Cache;
 // Use fully-qualified DateTime classes to avoid non-compound use statement warnings
 use Illuminate\Support\Facades\Log;
 
-final class ContextBuilder
+class ContextBuilder
 {
     /**
      * Return true when the provided UTC datetime falls on Saturday or Sunday.
@@ -49,12 +49,11 @@ final class ContextBuilder
     ) {}
 
     /**
-     * Build a DecisionContext for the given pair at timestamp $ts.
-     * Returns null if not enough warm-up data.
+     * Fetch and prepare market bar data for the given pair and timestamp.
+     *
+     * @return array{bars5: array, bars30: array}
      */
-    // Add $forceSpread to allow callers (like CLI) to bypass estimator cache when requested.
-    // Add $accountName to allow selecting which account/sleeve to use for position sizing
-    public function build(string $pair, \DateTimeImmutable $ts, mixed $newsDateOrDays = null, bool $fresh = false, bool $forceSpread = false, array $opts = [], ?string $accountName = null): ?array
+    private function getMarketBars(string $pair, \DateTimeImmutable $ts): array
     {
         // Resolve bootstrap limits from config (safe keys)
         $limit5 = (int) (config('pricing.bootstrap_limit_5min') ?? config('pricing.bootstrap_limit') ?? 500);
@@ -71,14 +70,20 @@ final class ContextBuilder
         $bars5 = array_values(array_filter($bars5, fn($b) => $b->ts <= $ts));
         $bars30 = array_values(array_filter($bars30, fn($b) => $b->ts <= $ts));
 
-        $featureSet = FeatureEngine::buildAt($bars5, $bars30, $ts, $pair);
-        if ($featureSet === null) {
-            return null;
-        }
+        return ['bars5' => $bars5, 'bars30' => $bars30];
+    }
 
+    /**
+     * Resolve the news date parameter from various inputs.
+     *
+     * @return array{dateParam: string, statDate: string}
+     */
+    private function resolveNewsDate(mixed $newsDateOrDays, \DateTimeImmutable $ts): array
+    {
         // Config-driven values (allow caller to override via $newsDateOrDays)
         $newsDays = is_int($newsDateOrDays) ? $newsDateOrDays : (int) config('decision.news_days', 1);
         $blackoutMinutes = (int) config('decision.blackout_minutes_high', 60);
+
         // Determine date parameter for stats: allow explicit string override via $newsDateOrDays
         if (is_string($newsDateOrDays) && $newsDateOrDays !== '') {
             $dateParam = $newsDateOrDays;
@@ -90,80 +95,133 @@ final class ContextBuilder
             $dateParam = $tsDate < $todayDate ? $tsDate : 'today';
         }
 
-        // Retrieve news data using NewsService if available, otherwise fallback to old logic
         // Resolve date parameter to explicit date for cache lookup
         $statDate = $dateParam === 'today' ? (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d') : $dateParam;
 
-        if ($this->newsService !== null) {
-            // Use the new NewsService
-            $newsData = $this->newsService->getNews($pair, $statDate);
+        return ['dateParam' => $dateParam, 'statDate' => $statDate];
+    }
 
-            $rawScore = $newsData->rawScore;
+    /**
+     * Get news data using the NewsService.
+     */
+    private function getNewsFromService(string $pair, string $statDate): array
+    {
+        $newsData = $this->newsService->getNews($pair, $statDate);
+
+        $rawScore = $newsData->rawScore;
+        $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
+
+        return [
+            'direction' => $direction,
+            'strength' => $newsData->strength,
+            'counts' => $newsData->counts,
+            'raw_score' => $rawScore,
+            'date' => $newsData->date,
+        ];
+    }
+
+    /**
+     * Get news data using fallback cache/database logic.
+     */
+    private function getNewsFromCache(string $pair, string $statDate): array
+    {
+        $cacheKey = NewsCacheKeyStrategy::statKey($pair, $statDate);
+        $newsData = Cache::get($cacheKey);
+
+        if ($newsData !== null && isset($newsData['raw_score'])) {
+            // Process cached API response data to match expected context format
+            $rawScore = (float) ($newsData['raw_score'] ?? 0.0);
             $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
 
-            $newsSummary = [
+            return [
                 'direction' => $direction,
-                'strength' => $newsData->strength,
-                'counts' => $newsData->counts,
+                'strength' => (float) ($newsData['strength'] ?? 0.0),
+                'counts' => $newsData['counts'] ?? ['pos' => 0, 'neg' => 0, 'neu' => 0],
                 'raw_score' => $rawScore,
-                'date' => $newsData->date,
+                'date' => $statDate,
             ];
-        } else {
-            // Fallback to old cache/database logic for backward compatibility
-            $cacheKey = NewsCacheKeyStrategy::statKey($pair, $statDate);
-            $newsData = Cache::get($cacheKey);
-
-            if ($newsData !== null && isset($newsData['raw_score'])) {
-                // Process cached API response data to match expected context format
-                $rawScore = (float) ($newsData['raw_score'] ?? 0.0);
-                $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
-
-                $newsSummary = [
-                    'direction' => $direction,
-                    'strength' => (float) ($newsData['strength'] ?? 0.0),
-                    'counts' => $newsData['counts'] ?? ['pos' => 0, 'neg' => 0, 'neu' => 0],
-                    'raw_score' => $rawScore,
-                    'date' => $statDate,
-                ];
-            } else {
-                // Cache miss - try to rebuild from database
-                $pairNorm = strtoupper(str_replace(['/', ' '], '-', $pair));
-                $newsStat = \App\Models\NewsStat::where('pair_norm', $pairNorm)
-                    ->where('stat_date', $statDate)
-                    ->first();
-
-                if ($newsStat && $newsStat->payload) {
-                    // Rebuild cache from database payload
-                    $newsData = $newsStat->payload;
-                    $ttl = NewsCacheKeyStrategy::getTtl($statDate);
-                    Cache::put($cacheKey, $newsData, $ttl);
-
-                    // Process the data
-                    $rawScore = (float) ($newsData['raw_score'] ?? 0.0);
-                    $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
-
-                    $newsSummary = [
-                        'direction' => $direction,
-                        'strength' => (float) ($newsData['strength'] ?? 0.0),
-                        'counts' => $newsData['counts'] ?? ['pos' => 0, 'neg' => 0, 'neu' => 0],
-                        'raw_score' => $rawScore,
-                        'date' => $statDate,
-                    ];
-                } else {
-                    // No cached data or database record available - use neutral defaults
-                    $newsSummary = [
-                        'direction' => 'neutral',
-                        'strength' => 0.0,
-                        'counts' => ['pos' => 0, 'neg' => 0, 'neu' => 0],
-                        'raw_score' => 0.0,
-                        'date' => $statDate,
-                    ];
-                }
-            }
         }
 
-        // record what date param was and what provider returned (helps tests be deterministic)
+        // Cache miss - try to rebuild from database
+        return $this->rebuildNewsFromDatabase($pair, $statDate, $cacheKey);
+    }
 
+    /**
+     * Rebuild news data from database and update cache.
+     */
+    private function rebuildNewsFromDatabase(string $pair, string $statDate, string $cacheKey): array
+    {
+        $pairNorm = strtoupper(str_replace(['/', ' '], '-', $pair));
+        $newsStat = \App\Models\NewsStat::where('pair_norm', $pairNorm)
+            ->whereDate('stat_date', $statDate)
+            ->first();
+
+        if ($newsStat) {
+            // Read data from payload if available, otherwise from model fields
+            $newsData = $newsStat->payload ?: [];
+
+            // Get raw_score from payload or model field
+            $rawScore = (float) ($newsData['raw_score'] ?? $newsStat->raw_score ?? 0.0);
+
+            // Get strength from payload or model field
+            $strength = (float) ($newsData['strength'] ?? $newsStat->strength ?? 0.0);
+
+            // Get counts from payload or build from model fields
+            $counts = $newsData['counts'] ?? [
+                'pos' => $newsStat->pos ?? 0,
+                'neg' => $newsStat->neg ?? 0,
+                'neu' => $newsStat->neu ?? 0,
+            ];
+
+            // Rebuild cache from combined data
+            $cacheData = [
+                'raw_score' => $rawScore,
+                'strength' => $strength,
+                'counts' => $counts,
+            ];
+            $ttl = NewsCacheKeyStrategy::getTtl($statDate);
+            Cache::put($cacheKey, $cacheData, $ttl);
+
+            $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
+
+            return [
+                'direction' => $direction,
+                'strength' => $strength,
+                'counts' => $counts,
+                'raw_score' => $rawScore,
+                'date' => $statDate,
+            ];
+        }
+
+        // No cached data or database record available - use neutral defaults
+        return [
+            'direction' => 'neutral',
+            'strength' => 0.0,
+            'counts' => ['pos' => 0, 'neg' => 0, 'neu' => 0],
+            'raw_score' => 0.0,
+            'date' => $statDate,
+        ];
+    }
+
+    /**
+     * Retrieve news data using NewsService if available, otherwise fallback to cache/database.
+     */
+    private function getNewsData(string $pair, string $statDate): array
+    {
+        if ($this->newsService !== null) {
+            return $this->getNewsFromService($pair, $statDate);
+        }
+
+        return $this->getNewsFromCache($pair, $statDate);
+    }
+
+    /**
+     * Process calendar data and compute blackout information.
+     *
+     * @return array{cal: mixed, blackout: bool, blkMin: int}
+     */
+    private function processCalendarData(string $pair, \DateTimeImmutable $ts): array
+    {
         // Attach calendar info
         $cal = $this->calendar->summary($pair, $ts);
 
@@ -189,57 +247,53 @@ final class ContextBuilder
             $nextMinutes = $cal['next_high']['minutes_to'];
         }
 
-        // preview metadata logged for debugging during development (removed in production)
+        return ['cal' => $cal, 'blackout' => $blackout, 'blkMin' => $blkMin];
+    }
 
-        // Compute tails and freshness provenance
-        $tail5 = count($bars5) ? end($bars5) : null;
-        $tail30 = count($bars30) ? end($bars30) : null;
-        $nowUtc = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $dataAgeSec = null;
-        if ($tail5 instanceof \App\Domain\Market\Bar) {
-            $dataAgeSec = max(0, $nowUtc->getTimestamp() - $tail5->ts->getTimestamp());
+    /**
+     * Select appropriate account and calculate available balance for position sizing.
+     *
+     * @return array{account: ?Account, sleeveBalance: float}
+     */
+    private function selectAccount(?string $accountName, string $pair): array
+    {
+        $account = null;
+        if ($accountName !== null) {
+            $account = Account::where('name', $accountName)->where('is_active', true)->first();
         }
 
-        $bars5meta = ['count' => count($bars5), 'tail_ts_utc' => $tail5 ? $tail5->ts->format(DATE_ATOM) : null];
-        $bars30meta = ['count' => count($bars30), 'tail_ts_utc' => $tail30 ? $tail30->ts->format(DATE_ATOM) : null];
-
-        // Market extras
-        $lastPrice = $tail5 instanceof \App\Domain\Market\Bar ? (float) $tail5->close : null;
-        // Convert atr5m to pips using helper that handles JPY pairs
-        $atr5m = $featureSet->atr5m ?? null;
-        $atr5mPips = is_numeric($atr5m) ? round(PipMath::toPips((float) $atr5m, $pair), 1) : null;
-
-        // Seconds until next 5-minute boundary (computed later conditionally)
-        $marketMeta = [
-            'last_price' => $lastPrice,
-            'atr5m_pips' => $atr5mPips,
-            'next_bar_eta_sec' => null,
-        ];
-
-        // Live spread estimate from IG (may return null)
-        $spread = null;
-        $marketStatus = null;
-        if ($this->spreadEstimator !== null) {
-            try {
-                $spread = $this->spreadEstimator->estimatePipsForPair($pair, $forceSpread);
-                $marketStatus = $this->spreadEstimator->getMarketStatusForPair($pair, $forceSpread);
-            } catch (\Throwable $e) {
-                Log::warning('ig_spread_unavailable', ['reason' => 'contextbuilder_call_failed', 'pair' => $pair, 'error' => $e->getMessage()]);
-                $spread = null;
-            }
+        // Fallback to default active trading account if no specific account requested
+        if ($account === null) {
+            $account = Account::active()->trading()->first();
         }
 
-        // Always expose the key so callers can observe when the estimator returned null.
-        $marketMeta['spread_estimate_pips'] = $spread;
-        $marketMeta['status'] = $marketStatus;
+        // If still no account found, log warning and use hardcoded fallback
+        $sleeveBalance = 10000.0; // default fallback
+        if ($account !== null) {
+            $sleeveBalance = (float) $account->calculateAvailableBalance();
+        } else {
+            Log::warning('No active trading account found, using hardcoded balance', [
+                'pair' => $pair,
+                'requested_account' => $accountName,
+                'fallback_balance' => $sleeveBalance,
+            ]);
+        }
 
-        // Fetch IG market status via MarketsEndpoint and cache for 30s.
-        // Resolve epic via Market model if possible, else attempt to derive from pair.
+        return ['account' => $account, 'sleeveBalance' => $sleeveBalance];
+    }
+
+    /**
+     * Fetch IG market status and quote age information.
+     *
+     * @return array{igMarketStatus: ?string, igMarketQuoteAge: ?int, cachedMarketId: ?string}
+     */
+    private function fetchIgMarketStatus(string $pair, \DateTimeImmutable $nowUtc): array
+    {
         $igMarketStatus = null;
         $igMarketQuoteAge = null;
         $cachedMarketId = null;
+
         try {
-            $market = null;
             $market = Market::where('symbol', $pair)->first();
             $epic = $market && $market->epic ? $market->epic : strtoupper(str_replace('/', '-', $pair));
 
@@ -256,6 +310,7 @@ final class ContextBuilder
                 $me = $this->markets ?? app(MarketsEndpoint::class);
                 $resp = $me->get($epic);
                 $status = $resp['snapshot']['marketStatus'] ?? null;
+
                 // compute quote_age_sec if updateTimestampUTC is present
                 $updateTs = $resp['snapshot']['updateTimestampUTC'] ?? $resp['snapshot']['updateTimestamp'] ?? null;
                 if (is_string($updateTs) && $updateTs !== '') {
@@ -288,6 +343,7 @@ final class ContextBuilder
                         // non-fatal - proceed without caching
                     }
                 }
+
                 if (is_string($status) && $status !== '') {
                     $igMarketStatus = $status;
                 } else {
@@ -308,6 +364,90 @@ final class ContextBuilder
             Log::warning('ig_market_status_unavailable', ['pair' => $pair, 'error' => $e->getMessage()]);
             $igMarketStatus = 'UNKNOWN';
         }
+
+        return [
+            'igMarketStatus' => $igMarketStatus,
+            'igMarketQuoteAge' => $igMarketQuoteAge,
+            'cachedMarketId' => $cachedMarketId,
+        ];
+    }
+
+    /**
+     * Fetch client sentiment data if available.
+     */
+    private function fetchSentimentData(string $pair, ?string $cachedMarketId, ?Market $market, array $opts): ?array
+    {
+        if ($this->sentimentProvider === null) {
+            return null;
+        }
+
+        try {
+            // Prefer the IG marketId resolved from the markets endpoint (if cached),
+            // otherwise fall back to the market epic or a derived token from the pair.
+            $marketIdToUse = $cachedMarketId ?? ($market && $market->epic ? $market->epic : strtoupper(str_replace('/', '-', $pair)));
+            $forceSentiment = (bool) ($opts['force_sentiment'] ?? false);
+
+            return $this->sentimentProvider->fetch($marketIdToUse, $forceSentiment);
+        } catch (\Throwable $e) {
+            Log::warning('client_sentiment_unavailable', ['pair' => $pair, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Build comprehensive market metadata including spread, status, and timing information.
+     *
+     * @return array{market: array, bars5meta: array, bars30meta: array, dataAgeSec: ?int}
+     */
+    private function buildMarketMetadata(string $pair, array $bars5, array $bars30, $featureSet, bool $forceSpread, \DateTimeImmutable $nowUtc, array $opts): array
+    {
+        // Compute tails and freshness provenance
+        $tail5 = count($bars5) ? end($bars5) : null;
+        $tail30 = count($bars30) ? end($bars30) : null;
+        $dataAgeSec = null;
+        if ($tail5 instanceof \App\Domain\Market\Bar) {
+            $dataAgeSec = max(0, $nowUtc->getTimestamp() - $tail5->ts->getTimestamp());
+        }
+
+        $bars5meta = ['count' => count($bars5), 'tail_ts_utc' => $tail5 ? $tail5->ts->format(DATE_ATOM) : null];
+        $bars30meta = ['count' => count($bars30), 'tail_ts_utc' => $tail30 ? $tail30->ts->format(DATE_ATOM) : null];
+
+        // Market extras
+        $lastPrice = $tail5 instanceof \App\Domain\Market\Bar ? (float) $tail5->close : null;
+        // Convert atr5m to pips using helper that handles JPY pairs
+        $atr5m = $featureSet->atr5m ?? null;
+        $atr5mPips = is_numeric($atr5m) ? round(PipMath::toPips((float) $atr5m, $pair), 1) : null;
+
+        // Start with basic market metadata
+        $marketMeta = [
+            'last_price' => $lastPrice,
+            'atr5m_pips' => $atr5mPips,
+            'next_bar_eta_sec' => null,
+        ];
+
+        // Live spread estimate from IG (may return null)
+        $spread = null;
+        $marketStatus = null;
+        if ($this->spreadEstimator !== null) {
+            try {
+                $spread = $this->spreadEstimator->estimatePipsForPair($pair, $forceSpread);
+                $marketStatus = $this->spreadEstimator->getMarketStatusForPair($pair, $forceSpread);
+            } catch (\Throwable $e) {
+                Log::warning('ig_spread_unavailable', ['reason' => 'contextbuilder_call_failed', 'pair' => $pair, 'error' => $e->getMessage()]);
+                $spread = null;
+            }
+        }
+
+        // Always expose the key so callers can observe when the estimator returned null.
+        $marketMeta['spread_estimate_pips'] = $spread;
+        $marketMeta['status'] = $marketStatus;
+
+        // Fetch IG market status and quote age
+        $igInfo = $this->fetchIgMarketStatus($pair, $nowUtc);
+        $igMarketStatus = $igInfo['igMarketStatus'];
+        $igMarketQuoteAge = $igInfo['igMarketQuoteAge'];
+        $cachedMarketId = $igInfo['cachedMarketId'];
 
         // Expose the canonical IG market id when we resolved one (may be null)
         $marketMeta['market_id'] = is_string($cachedMarketId) ? $cachedMarketId : null;
@@ -366,51 +506,89 @@ final class ContextBuilder
         }
 
         // Attach client sentiment if available via provider (may be null)
-        $sentiment = null;
-        try {
-            if ($this->sentimentProvider !== null) {
-                // Prefer the IG marketId resolved from the markets endpoint (if cached),
-                // otherwise fall back to the market epic or a derived token from the pair.
-                $marketIdToUse = $cachedMarketId ?? ($market && $market->epic ? $market->epic : strtoupper(str_replace('/', '-', $pair)));
-                $forceSentiment = (bool) ($opts['force_sentiment'] ?? false);
-                $sentiment = $this->sentimentProvider->fetch($marketIdToUse, $forceSentiment);
-            }
-        } catch (\Throwable $e) {
-            Log::warning('client_sentiment_unavailable', ['pair' => $pair, 'error' => $e->getMessage()]);
-            $sentiment = null;
-        }
+        $market = Market::where('symbol', $pair)->first();
+        $sentiment = $this->fetchSentimentData($pair, $cachedMarketId, $market, $opts);
 
         if ($sentiment !== null) {
             $marketMeta['sentiment'] = $sentiment;
         }
+
+        return [
+            'marketMeta' => $marketMeta,
+            'maxDataAge' => $maxDataAge,
+            'maxQuoteAge' => $maxQuoteAge,
+            'bars5meta' => $bars5meta,
+            'bars30meta' => $bars30meta,
+            'dataAgeSec' => $dataAgeSec,
+        ];
+    }
+
+    /**
+     * Build a DecisionContext for the given pair at timestamp $ts.
+     * Returns null if not enough warm-up data.
+     */
+    // Add $forceSpread to allow callers (like CLI) to bypass estimator cache when requested.
+    // Add $accountName to allow selecting which account/sleeve to use for position sizing
+    public function build(string $pair, \DateTimeImmutable $ts, mixed $newsDateOrDays = null, bool $fresh = false, bool $forceSpread = false, array $opts = [], ?string $accountName = null): ?array
+    {
+        $marketBars = $this->getMarketBars($pair, $ts);
+        $bars5 = $marketBars['bars5'];
+        $bars30 = $marketBars['bars30'];
+
+        $featureSet = FeatureEngine::buildAt($bars5, $bars30, $ts, $pair);
+        if ($featureSet === null) {
+            return null;
+        }
+
+        $dateInfo = $this->resolveNewsDate($newsDateOrDays, $ts);
+        $dateParam = $dateInfo['dateParam'];
+        $statDate = $dateInfo['statDate'];
+
+        $newsSummary = $this->getNewsData($pair, $statDate);
+
+        // record what date param was and what provider returned (helps tests be deterministic)
+
+        $calendarInfo = $this->processCalendarData($pair, $ts);
+        $cal = $calendarInfo['cal'];
+        $blackout = $calendarInfo['blackout'];
+        $blkMin = $calendarInfo['blkMin'];
+
+        // preview metadata logged for debugging during development (removed in production)
+
+        // Compute tails and freshness provenance
+        $tail5 = count($bars5) ? end($bars5) : null;
+        $tail30 = count($bars30) ? end($bars30) : null;
+        $nowUtc = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $dataAgeSec = null;
+        if ($tail5 instanceof \App\Domain\Market\Bar) {
+            $dataAgeSec = max(0, $nowUtc->getTimestamp() - $tail5->ts->getTimestamp());
+        }
+
+        $bars5meta = ['count' => count($bars5), 'tail_ts_utc' => $tail5 ? $tail5->ts->format(DATE_ATOM) : null];
+        $bars30meta = ['count' => count($bars30), 'tail_ts_utc' => $tail30 ? $tail30->ts->format(DATE_ATOM) : null];
+
+        // Build comprehensive market metadata
+        $marketMetadata = $this->buildMarketMetadata(
+            $pair,
+            $bars5,
+            $bars30,
+            $featureSet,
+            $forceSpread,
+            $nowUtc,
+            $opts
+        );
+        $marketMeta = $marketMetadata['marketMeta'];
+        $maxDataAge = $marketMetadata['maxDataAge'];
+        $maxQuoteAge = $marketMetadata['maxQuoteAge'];
 
         // Remove blackout duplication from calendar payload if provider added it
         if (is_array($cal) && isset($cal['blackout_minutes_high'])) {
             unset($cal['blackout_minutes_high']);
         }
 
-        // Select account for position sizing
-        $account = null;
-        if ($accountName !== null) {
-            $account = Account::where('name', $accountName)->where('is_active', true)->first();
-        }
-
-        // Fallback to default active trading account if no specific account requested
-        if ($account === null) {
-            $account = Account::active()->trading()->first();
-        }
-
-        // If still no account found, log warning and use hardcoded fallback
-        $sleeveBalance = 10000.0; // default fallback
-        if ($account !== null) {
-            $sleeveBalance = (float) $account->calculateAvailableBalance();
-        } else {
-            Log::warning('No active trading account found, using hardcoded balance', [
-                'pair' => $pair,
-                'requested_account' => $accountName,
-                'fallback_balance' => $sleeveBalance,
-            ]);
-        }
+        $accountInfo = $this->selectAccount($accountName, $pair);
+        $account = $accountInfo['account'];
+        $sleeveBalance = $accountInfo['sleeveBalance'];
 
         // Create DecisionContext and pass meta via constructor (non-breaking addition)
         $ctx = new DecisionContext($pair, $ts, $featureSet, [
