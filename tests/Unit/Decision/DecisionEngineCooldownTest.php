@@ -1,8 +1,10 @@
 <?php
 
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Execution\PositionLedgerContract;
 use App\Domain\Rules\AlphaRules;
+use App\Support\Clock\ClockInterface;
 
 it('holds when within cooldown after loss', function () {
     $rulesYaml = <<<'YAML'
@@ -24,8 +26,8 @@ YAML;
     $rules = new AlphaRules($path);
     $rules->reload();
 
-    $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-    $tenMinutesAgo = $now->sub(new DateInterval('PT10M'));
+    $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+    $tenMinutesAgo = $now->sub(new \DateInterval('PT10M'));
 
     // Fake ledger that returns a recent loss
     $fake = new class($tenMinutesAgo) implements PositionLedgerContract
@@ -58,8 +60,6 @@ YAML;
         }
     };
 
-    app()->instance(PositionLedgerContract::class, $fake);
-
     $ctx = [
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 10],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5],
@@ -68,14 +68,19 @@ YAML;
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide($ctx, $rules);
+    $clock = new class($now) implements ClockInterface
+    {
+        public function __construct(private DateTimeImmutable $now) {}
+
+        public function now(): DateTimeImmutable
+        {
+            return $this->now;
+        }
+    };
+
+    $engine = new LiveDecisionEngine($rules, $clock, $fake);
+    $res = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
 
     expect($res['action'])->toBe('hold');
     expect($res['reasons'])->toContain('cooldown_active');
-
-    // Restore default ledger binding so other tests are unaffected
-    app()->bind(\App\Domain\Execution\PositionLedgerContract::class, function () {
-        return new \App\Domain\Execution\NullPositionLedger;
-    });
 });

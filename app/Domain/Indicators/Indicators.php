@@ -3,6 +3,15 @@
 namespace App\Domain\Indicators;
 
 use App\Domain\Market\Bar;
+use Ds\Vector;
+use MathPHP\Statistics\Average;
+use MathPHP\Statistics\Descriptive;
+use MathPHP\Statistics\Regression\Linear;
+use MathPHP\Exception\BadDataException;
+use MathPHP\Exception\OutOfBoundsException;
+use MathPHP\Exception\IncorrectTypeException;
+use MathPHP\Exception\MathException;
+use MathPHP\Exception\MatrixException;
 
 final class Indicators
 {
@@ -18,23 +27,19 @@ final class Indicators
             return null;
         }
 
-        // seed with SMA of first $period closes
-        $sum = 0.0;
-        for ($i = 0; $i < $period; $i++) {
-            $sum += $bars[$i]->close;
-        }
-        $sma = $sum / $period;
-
-        $mult = 2.0 / ($period + 1);
-
-        // first EMA value corresponds to index $period - 1 (SMA), next applies to $period
-        $ema = $sma;
-        for ($i = $period; $i < $count; $i++) {
-            $close = $bars[$i]->close;
-            $ema = ($close - $ema) * $mult + $ema;
+        if (! function_exists('trader_ema')) {
+            throw new \RuntimeException('Trader extension is required but not available.');
         }
 
-        return $ema;
+        $closes = array_map(fn (Bar $bar) => $bar->close, $bars);
+        $emaSeries = trader_ema($closes, $period);
+        if (! is_array($emaSeries) || $emaSeries === []) {
+            return null;
+        }
+
+        $emaValue = end($emaSeries);
+
+        return $emaValue === false ? null : (float) $emaValue;
     }
 
     /**
@@ -49,38 +54,22 @@ final class Indicators
             return null;
         }
 
-        $trs = [];
-        for ($i = 1; $i < $count; $i++) {
-            $high = $bars[$i]->high;
-            $low = $bars[$i]->low;
-            $prevClose = $bars[$i - 1]->close;
-
-            $tr = max(
-                $high - $low,
-                abs($high - $prevClose),
-                abs($low - $prevClose)
-            );
-            $trs[] = $tr;
+        if (! function_exists('trader_atr')) {
+            throw new \RuntimeException('Trader extension is required but not available.');
         }
 
-        if (count($trs) < $period) {
+        $highs = array_map(fn (Bar $bar) => $bar->high, $bars);
+        $lows = array_map(fn (Bar $bar) => $bar->low, $bars);
+        $closes = array_map(fn (Bar $bar) => $bar->close, $bars);
+
+        $atrSeries = trader_atr($highs, $lows, $closes, $period);
+        if (! is_array($atrSeries) || $atrSeries === []) {
             return null;
         }
 
-        // seed ATR as simple average of first $period TRs
-        $sum = 0.0;
-        for ($i = 0; $i < $period; $i++) {
-            $sum += $trs[$i];
-        }
-        $atr = $sum / $period;
+        $atr = end($atrSeries);
 
-        // Wilder smoothing for remaining TRs
-        for ($i = $period; $i < count($trs); $i++) {
-            $tr = $trs[$i];
-            $atr = (($atr * ($period - 1)) + $tr) / $period;
-        }
-
-        return $atr;
+        return $atr === false ? null : (float) $atr;
     }
 
     /**
@@ -112,16 +101,12 @@ final class Indicators
             return null;
         }
 
-        $mean = array_sum($closes) / $n;
-        $sumSq = 0.0;
-        foreach ($closes as $c) {
-            $d = $c - $mean;
-            $sumSq += $d * $d;
+        try {
+            $mean = Average::mean($closes);
+            $stdev = Descriptive::standardDeviation($closes);
+        } catch (BadDataException | OutOfBoundsException $e) {
+            return null;
         }
-
-        // sample standard deviation (n-1) if n>1, else 0
-        $variance = ($n > 1) ? ($sumSq / ($n - 1)) : 0.0;
-        $stdev = sqrt($variance);
 
         if ($stdev == 0.0) {
             return null;
@@ -194,32 +179,19 @@ final class Indicators
 
         // compute simple moving averages for the last (ma + 5) closes
         $closes = array_map(fn (Bar $b) => $b->close, $bars30m);
-
-        $lastIndex = $count - 1;
-        $k = 5;
-
-        // helper to compute SMA ending at index $end (inclusive)
-        $smaAt = function (int $end) use ($closes, $ma) {
-            $start = $end - $ma + 1;
-            if ($start < 0) {
-                return null;
-            }
-            $sum = 0.0;
-            for ($i = $start; $i <= $end; $i++) {
-                $sum += $closes[$i];
-            }
-
-            return $sum / $ma;
-        };
-
-        $maNow = $smaAt($lastIndex);
-        $maPast = $smaAt($lastIndex - $k);
-
-        if ($maNow === null || $maPast === null) {
-            return 'sideways';
+        $window = array_slice($closes, -$ma);
+        $points = [];
+        foreach ($window as $index => $price) {
+            $points[] = [$index, $price];
         }
 
-        $slope = $maNow - $maPast;
+        try {
+            $regression = new Linear($points);
+            $parameters = $regression->getParameters();
+            $slope = $parameters['m'];
+        } catch (BadDataException | IncorrectTypeException | MatrixException | MathException $e) {
+            return 'sideways';
+        }
 
         if ($slope > $flat) {
             return 'up';
@@ -239,118 +211,28 @@ final class Indicators
     public static function adx(array $bars, int $period = 14): ?float
     {
         $count = count($bars);
-        // Need at least period+1 bars to compute TR/DM series and period more for ADX
         if ($count < $period + 1) {
             return null;
         }
 
-        $trs = [];
-        $plusDM = [];
-        $minusDM = [];
-
-        for ($i = 1; $i < $count; $i++) {
-            $high = $bars[$i]->high;
-            $low = $bars[$i]->low;
-            $prevHigh = $bars[$i - 1]->high;
-            $prevLow = $bars[$i - 1]->low;
-            $prevClose = $bars[$i - 1]->close;
-
-            $tr = max(
-                $high - $low,
-                abs($high - $prevClose),
-                abs($low - $prevClose)
-            );
-            $trs[] = $tr;
-
-            $upMove = $high - $prevHigh;
-            $downMove = $prevLow - $low;
-
-            $pdm = 0.0;
-            $mdm = 0.0;
-            if ($upMove > $downMove && $upMove > 0) {
-                $pdm = $upMove;
-            }
-            if ($downMove > $upMove && $downMove > 0) {
-                $mdm = $downMove;
-            }
-
-            $plusDM[] = $pdm;
-            $minusDM[] = $mdm;
+        if (! function_exists('trader_adx')) {
+            throw new \RuntimeException('Trader extension is required but not available.');
         }
 
-        if (count($trs) < $period) {
+        $highs = array_map(fn (Bar $bar) => $bar->high, $bars);
+        $lows = array_map(fn (Bar $bar) => $bar->low, $bars);
+        $closes = array_map(fn (Bar $bar) => $bar->close, $bars);
+
+        $adxSeries = trader_adx($highs, $lows, $closes, $period);
+        if (! is_array($adxSeries) || $adxSeries === []) {
             return null;
         }
 
-        // Wilder smoothing: seed with sum of first period values
-        $sumTR = 0.0;
-        $sumPDM = 0.0;
-        $sumMDM = 0.0;
-        for ($i = 0; $i < $period; $i++) {
-            $sumTR += $trs[$i];
-            $sumPDM += $plusDM[$i];
-            $sumMDM += $minusDM[$i];
-        }
+        $adx = end($adxSeries);
 
-        $smoothedTR = $sumTR;
-        $smoothedPDM = $sumPDM;
-        $smoothedMDM = $sumMDM;
-
-        $plusDI = [];
-        $minusDI = [];
-
-        // First DI values for index = period - 1 (corresponds to trs index period-1)
-        $firstPlusDI = ($smoothedTR == 0.0) ? 0.0 : (100.0 * ($smoothedPDM / $smoothedTR));
-        $firstMinusDI = ($smoothedTR == 0.0) ? 0.0 : (100.0 * ($smoothedMDM / $smoothedTR));
-        $plusDI[] = $firstPlusDI;
-        $minusDI[] = $firstMinusDI;
-
-        // Continue smoothing for remaining TRs starting at index = period
-        for ($i = $period; $i < count($trs); $i++) {
-            $tr = $trs[$i];
-            $pdm = $plusDM[$i];
-            $mdm = $minusDM[$i];
-
-            $smoothedTR = $smoothedTR - ($smoothedTR / $period) + $tr;
-            $smoothedPDM = $smoothedPDM - ($smoothedPDM / $period) + $pdm;
-            $smoothedMDM = $smoothedMDM - ($smoothedMDM / $period) + $mdm;
-
-            $pdi = ($smoothedTR == 0.0) ? 0.0 : (100.0 * ($smoothedPDM / $smoothedTR));
-            $mdi = ($smoothedTR == 0.0) ? 0.0 : (100.0 * ($smoothedMDM / $smoothedTR));
-
-            $plusDI[] = $pdi;
-            $minusDI[] = $mdi;
-        }
-
-        // compute DX series for each DI pair
-        $dxs = [];
-        $len = count($plusDI);
-        for ($i = 0; $i < $len; $i++) {
-            $p = $plusDI[$i];
-            $m = $minusDI[$i];
-            $den = $p + $m;
-            $dx = ($den == 0.0) ? 0.0 : (100.0 * (abs($p - $m) / $den));
-            $dxs[] = $dx;
-        }
-
-        if (count($dxs) < $period) {
-            return null;
-        }
-
-        // ADX seed: average of first $period DXs
-        $sumDx = 0.0;
-        for ($i = 0; $i < $period; $i++) {
-            $sumDx += $dxs[$i];
-        }
-        $adx = $sumDx / $period;
-
-        // Wilder smoothing of DX to ADX for remaining
-        for ($i = $period; $i < count($dxs); $i++) {
-            $adx = (($adx * ($period - 1)) + $dxs[$i]) / $period;
-        }
-
-        return $adx;
+        return $adx === false ? null : (float) $adx;
     }
+
 
     /**
      * Simple pivot-based swing support/resistance detection.
@@ -366,8 +248,8 @@ final class Indicators
         }
 
         $start = max(0, $count - $lookback);
-        $supports = [];
-        $resistances = [];
+        $supports = new Vector();
+        $resistances = new Vector();
 
         // scan from newest to oldest to get most recent pivots first
         for ($i = $count - 1; $i >= $start; $i--) {
@@ -403,19 +285,18 @@ final class Indicators
             }
 
             if ($isHigh) {
-                $resistances[] = $bars[$i]->high;
+                $resistances->push($bars[$i]->high);
             }
             if ($isLow) {
-                $supports[] = $bars[$i]->low;
-            }
-
-            if (count($supports) >= 3 && count($resistances) >= 3) {
-                break;
+                $supports->push($bars[$i]->low);
             }
         }
 
         // most recent first already due to scanning direction
-        return ['support' => array_slice($supports, 0, 3), 'resistance' => array_slice($resistances, 0, 3)];
+        return [
+            'support' => array_slice($supports->toArray(), 0, 3),
+            'resistance' => array_slice($resistances->toArray(), 0, 3),
+        ];
     }
 
     /**
@@ -432,39 +313,19 @@ final class Indicators
             return null;
         }
 
-        $gains = [];
-        $losses = [];
-
-        // Calculate price changes
-        for ($i = 1; $i < $count; $i++) {
-            $change = $bars[$i]->close - $bars[$i - 1]->close;
-            $gains[] = $change > 0 ? $change : 0.0;
-            $losses[] = $change < 0 ? abs($change) : 0.0;
+        if (! function_exists('trader_rsi')) {
+            throw new \RuntimeException('Trader extension is required but not available.');
         }
 
-        if (count($gains) < $period) {
+        $closes = array_map(fn (Bar $bar) => $bar->close, $bars);
+        $rsiSeries = trader_rsi($closes, $period);
+        if (! is_array($rsiSeries) || $rsiSeries === []) {
             return null;
         }
 
-        // Initial average gain and loss (SMA for first period)
-        $avgGain = array_sum(array_slice($gains, 0, $period)) / $period;
-        $avgLoss = array_sum(array_slice($losses, 0, $period)) / $period;
+        $rsi = end($rsiSeries);
 
-        // Apply Wilder's smoothing for remaining periods
-        for ($i = $period; $i < count($gains); $i++) {
-            $avgGain = (($avgGain * ($period - 1)) + $gains[$i]) / $period;
-            $avgLoss = (($avgLoss * ($period - 1)) + $losses[$i]) / $period;
-        }
-
-        // Calculate RSI
-        if ($avgLoss == 0.0) {
-            return 100.0; // Avoid division by zero
-        }
-
-        $rs = $avgGain / $avgLoss;
-        $rsi = 100.0 - (100.0 / (1.0 + $rs));
-
-        return $rsi;
+        return $rsi === false ? null : (float) $rsi;
     }
 
     /**
@@ -485,31 +346,36 @@ final class Indicators
             return null;
         }
 
-        // Calculate fast and slow EMAs
-        $fastEma = self::ema($bars, $fastPeriod);
-        $slowEma = self::ema($bars, $slowPeriod);
+        if (! function_exists('trader_macd')) {
+            throw new \RuntimeException('Trader extension is required but not available.');
+        }
 
-        if ($fastEma === null || $slowEma === null) {
+        $closes = array_map(static fn (Bar $bar) => $bar->close, $bars);
+        $macdResult = trader_macd($closes, $fastPeriod, $slowPeriod, $signalPeriod);
+        if (! is_array($macdResult) || count($macdResult) < 3) {
             return null;
         }
 
-        // MACD line = fast EMA - slow EMA
-        $macdLine = $fastEma - $slowEma;
+        [$macdSeries, $signalSeries, $histSeries] = array_values($macdResult);
+        if (! is_array($macdSeries) || $macdSeries === [] || ! is_array($signalSeries) || $signalSeries === [] || ! is_array($histSeries) || $histSeries === []) {
+            return null;
+        }
 
-        // For signal line, we need MACD values over time, but for simplicity
-        // we'll approximate using the current MACD value
-        // In a full implementation, you'd track MACD history and calculate signal EMA
-        $signalLine = $macdLine; // Simplified - in practice, this should be EMA of MACD line
+        $macdLine = end($macdSeries);
+        $signalLine = end($signalSeries);
+        $histogram = end($histSeries);
 
-        // Histogram = MACD line - signal line
-        $histogram = $macdLine - $signalLine;
+        if ($macdLine === false || $signalLine === false || $histogram === false) {
+            return null;
+        }
 
         return [
-            'macd' => $macdLine,
-            'signal' => $signalLine,
-            'histogram' => $histogram,
+            'macd' => (float) $macdLine,
+            'signal' => (float) $signalLine,
+            'histogram' => (float) $histogram,
         ];
     }
+
 
     /**
      * Bollinger Bands indicator.
@@ -526,27 +392,37 @@ final class Indicators
             return null;
         }
 
-        // Calculate Simple Moving Average (middle band)
-        $closes = array_map(fn ($bar) => $bar->close, array_slice($bars, -$period));
-        $sma = array_sum($closes) / $period;
-
-        // Calculate standard deviation
-        $variance = 0.0;
-        foreach ($closes as $close) {
-            $variance += pow($close - $sma, 2);
+        if (! function_exists('trader_bbands')) {
+            throw new \RuntimeException('Trader extension is required but not available.');
         }
-        $stdDev = sqrt($variance / $period);
 
-        // Calculate bands
-        $upperBand = $sma + ($multiplier * $stdDev);
-        $lowerBand = $sma - ($multiplier * $stdDev);
+        $maType = defined('TRADER_MA_TYPE_SMA') ? constant('TRADER_MA_TYPE_SMA') : 0;
+        $closes = array_map(fn (Bar $bar) => $bar->close, $bars);
+        $bands = trader_bbands($closes, $period, $multiplier, $multiplier, $maType);
+        if (! is_array($bands) || count($bands) !== 3) {
+            return null;
+        }
+
+        [$upperSeries, $middleSeries, $lowerSeries] = array_values($bands);
+        if (! is_array($upperSeries) || $upperSeries === [] || ! is_array($middleSeries) || $middleSeries === [] || ! is_array($lowerSeries) || $lowerSeries === []) {
+            return null;
+        }
+
+        $upper = end($upperSeries);
+        $middle = end($middleSeries);
+        $lower = end($lowerSeries);
+
+        if ($upper === false || $middle === false || $lower === false) {
+            return null;
+        }
 
         return [
-            'upper' => $upperBand,
-            'middle' => $sma,
-            'lower' => $lowerBand,
+            'upper' => (float) $upper,
+            'middle' => (float) $middle,
+            'lower' => (float) $lower,
         ];
     }
+
 
     /**
      * Stochastic Oscillator %K and %D.
@@ -591,7 +467,11 @@ final class Indicators
 
         // %D is SMA of last $dPeriod %K values
         $recentKValues = array_slice($kValues, -$dPeriod);
-        $currentD = array_sum($recentKValues) / $dPeriod;
+        try {
+            $currentD = Average::mean($recentKValues);
+        } catch (BadDataException $e) {
+            return null;
+        }
 
         return [
             'k' => $currentK,
@@ -676,18 +556,16 @@ final class Indicators
         // Get the last $period typical prices
         $recentTPs = array_slice($typicalPrices, -$period);
 
-        // Calculate Simple Moving Average of Typical Prices
-        $smaTP = array_sum($recentTPs) / $period;
+        try {
+            // Calculate Simple Moving Average of Typical Prices
+            $smaTP = Average::mean($recentTPs);
+            $meanDeviation = Descriptive::meanAbsoluteDeviation($recentTPs);
+        } catch (BadDataException $e) {
+            return null;
+        }
 
         // Current Typical Price
         $currentTP = end($typicalPrices);
-
-        // Calculate Mean Deviation
-        $deviations = [];
-        foreach ($recentTPs as $tp) {
-            $deviations[] = abs($tp - $smaTP);
-        }
-        $meanDeviation = array_sum($deviations) / $period;
 
         // Avoid division by zero
         if ($meanDeviation == 0) {

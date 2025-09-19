@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Application\ContextBuilder;
-use App\Domain\Decision\DecisionEngine;
 use App\Domain\Rules\AlphaRules;
 
 it('prints JSON and returns non-zero when strict and hold', function () {
@@ -31,7 +30,7 @@ it('prints JSON and returns non-zero when strict and hold', function () {
         }
     });
 
-    // Use real AlphaRules instance backed by a minimal temp YAML so DecisionEngine type-hint is satisfied
+    // Use real AlphaRules instance backed by a minimal temp YAML so LiveDecisionEngine type-hint is satisfied
     $tmp = sys_get_temp_dir().'/alpharules_test_'.uniqid().'.yml';
     file_put_contents($tmp, "gates: {}\nconfluence: {}\nrisk: {}\nexecution: {}\ncooldowns: {}\noverrides: {}\n");
     $rules = new AlphaRules($tmp);

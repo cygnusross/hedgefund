@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Rules\AlphaRules;
 
 it('holds when ADX below configured minimum', function () {
@@ -17,7 +18,7 @@ it('holds when ADX below configured minimum', function () {
 
     $payload = [
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 1],
-        'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'spread_estimate_pips' => 0.5],
+        'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'spread_estimate_pips' => 0.5, 'atr5m_pips' => 10],
         'features' => $featuresArr,
         'news' => ['strength' => 0.0, 'direction' => 'neutral'],
         'calendar' => ['within_blackout' => false],
@@ -27,21 +28,8 @@ it('holds when ADX below configured minimum', function () {
     $arr = $payload;
     $arr['features']['adx5m'] = 10;
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide(new class($arr)
-    {
-        private $p;
-
-        public function __construct($p)
-        {
-            $this->p = $p;
-        }
-
-        public function toArray()
-        {
-            return $this->p;
-        }
-    }, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $res = $engine->decide(DecisionRequest::fromArray($arr))->toArray();
 
     expect($res['action'])->toBe('hold');
     expect(is_array($res['reasons']))->toBeTrue();
@@ -59,7 +47,7 @@ it('holds when ema z stretched beyond configured max', function () {
 
     $payload = [
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 1],
-        'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'spread_estimate_pips' => 0.5],
+        'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'spread_estimate_pips' => 0.5, 'atr5m_pips' => 10],
         'features' => $featuresArr,
         'news' => ['strength' => 0.0, 'direction' => 'neutral'],
         'calendar' => ['within_blackout' => false],
@@ -68,23 +56,133 @@ it('holds when ema z stretched beyond configured max', function () {
     $arr = $payload;
     $arr['features']['ema20_z'] = 1.5;
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide(new class($arr)
-    {
-        private $p;
-
-        public function __construct($p)
-        {
-            $this->p = $p;
-        }
-
-        public function toArray()
-        {
-            return $this->p;
-        }
-    }, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $res = $engine->decide(DecisionRequest::fromArray($arr))->toArray();
 
     expect($res['action'])->toBe('hold');
     expect(is_array($res['reasons']))->toBeTrue();
     expect($res['reasons'])->toContain('stretched_z');
+});
+
+it('allows lower adx when market override present', function () {
+    $rules = new AlphaRules(__DIR__.'/fixtures/empty_rules.yaml');
+    $ref = new ReflectionClass($rules);
+    $prop = $ref->getProperty('data');
+    $prop->setAccessible(true);
+    $prop->setValue($rules, [
+        'gates' => [
+            'news_threshold' => ['strong' => 0.45, 'moderate' => 0.3, 'deadband' => 0.1],
+            'adx_min' => 25,
+            'atr_min_pips' => 2.5,
+        ],
+        'confluence' => ['require_trend_alignment_for_moderate' => true, 'allow_strong_against_trend' => false],
+        'risk' => [
+            'per_trade_pct' => ['default' => 1.0, 'strong' => 1.0, 'moderate' => 1.0],
+            'per_trade_cap_pct' => 2.0,
+            'pair_exposure_pct' => 100,
+        ],
+        'execution' => [
+            'sl_atr_mult' => 1.8,
+            'tp_atr_mult' => 3.6,
+            'sl_min_pips' => 5.0,
+            'spread_ceiling_pips' => 5.0,
+        ],
+        'cooldowns' => [],
+        'overrides' => [],
+    ]);
+
+    $payload = [
+        'meta' => ['pair_norm' => 'NZDUSD', 'data_age_sec' => 10],
+        'market' => [
+            'status' => 'TRADEABLE',
+            'last_price' => 0.60,
+            'spread_estimate_pips' => 0.8,
+            'atr5m_pips' => 5.0,
+            'gate_overrides' => ['adx_min' => 15],
+        ],
+        'features' => [
+            'ema20' => 0.60,
+            'atr5m' => 0.0005,
+            'ema20_z' => 0.2,
+            'recentRangePips' => 12,
+            'adx5m' => 18,
+            'trend30m' => 'up',
+            'supportLevels' => [],
+            'resistanceLevels' => [],
+            'rsi14' => 50,
+            'stoch_k' => 50,
+            'stoch_d' => 50,
+            'williamsR' => -50,
+            'cci' => 0,
+        ],
+        'news' => ['strength' => 0.6, 'direction' => 'buy'],
+        'calendar' => ['within_blackout' => false],
+    ];
+
+    $engine = new LiveDecisionEngine($rules);
+    $res = $engine->decide(DecisionRequest::fromArray($payload))->toArray();
+
+    expect($res['action'])->toBe('buy');
+    expect($res['reasons'])->not->toContain('low_adx');
+});
+
+it('blocks when atr is below configured minimum', function () {
+    $rules = new AlphaRules(__DIR__.'/fixtures/empty_rules.yaml');
+    $ref = new ReflectionClass($rules);
+    $prop = $ref->getProperty('data');
+    $prop->setAccessible(true);
+    $prop->setValue($rules, [
+        'gates' => [
+            'news_threshold' => ['strong' => 0.45, 'moderate' => 0.3, 'deadband' => 0.1],
+            'adx_min' => 25,
+            'atr_min_pips' => 2.5,
+        ],
+        'confluence' => ['require_trend_alignment_for_moderate' => true, 'allow_strong_against_trend' => false],
+        'risk' => [
+            'per_trade_pct' => ['default' => 1.0, 'strong' => 1.0, 'moderate' => 1.0],
+            'per_trade_cap_pct' => 2.0,
+            'pair_exposure_pct' => 100,
+        ],
+        'execution' => [
+            'sl_atr_mult' => 1.8,
+            'tp_atr_mult' => 3.6,
+            'sl_min_pips' => 5.0,
+            'spread_ceiling_pips' => 5.0,
+        ],
+        'cooldowns' => [],
+        'overrides' => [],
+    ]);
+
+    $payload = [
+        'meta' => ['pair_norm' => 'NZDUSD', 'data_age_sec' => 10],
+        'market' => [
+            'status' => 'TRADEABLE',
+            'last_price' => 0.60,
+            'spread_estimate_pips' => 0.8,
+            'atr5m_pips' => 1.2,
+        ],
+        'features' => [
+            'ema20' => 0.60,
+            'atr5m' => 0.00012,
+            'ema20_z' => 0.1,
+            'recentRangePips' => 5,
+            'adx5m' => 30,
+            'trend30m' => 'up',
+            'supportLevels' => [],
+            'resistanceLevels' => [],
+            'rsi14' => 50,
+            'stoch_k' => 50,
+            'stoch_d' => 50,
+            'williamsR' => -50,
+            'cci' => 0,
+        ],
+        'news' => ['strength' => 0.6, 'direction' => 'buy'],
+        'calendar' => ['within_blackout' => false],
+    ];
+
+    $engine = new LiveDecisionEngine($rules);
+    $res = $engine->decide(DecisionRequest::fromArray($payload))->toArray();
+
+    expect($res['action'])->toBe('hold');
+    expect($res['reasons'])->toContain('atr_too_low');
 });

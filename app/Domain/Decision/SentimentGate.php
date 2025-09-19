@@ -3,6 +3,8 @@
 namespace App\Domain\Decision;
 
 use App\Domain\Rules\AlphaRules;
+use App\Support\Math\Decimal;
+use Brick\Math\RoundingMode;
 use Psr\Log\LoggerInterface;
 
 final class SentimentGate
@@ -29,16 +31,16 @@ final class SentimentGate
         $long = null;
         $short = null;
         if (isset($sentimentPayload['long']) && is_numeric($sentimentPayload['long'])) {
-            $long = (int) $sentimentPayload['long'];
+            $long = $this->normalizePercent($sentimentPayload['long']);
         }
         if (isset($sentimentPayload['short']) && is_numeric($sentimentPayload['short'])) {
-            $short = (int) $sentimentPayload['short'];
+            $short = $this->normalizePercent($sentimentPayload['short']);
         }
         if ($long === null && isset($sentimentPayload['long_pct']) && is_numeric($sentimentPayload['long_pct'])) {
-            $long = (int) round((float) $sentimentPayload['long_pct']);
+            $long = $this->normalizePercent($sentimentPayload['long_pct']);
         }
         if ($short === null && isset($sentimentPayload['short_pct']) && is_numeric($sentimentPayload['short_pct'])) {
-            $short = (int) round((float) $sentimentPayload['short_pct']);
+            $short = $this->normalizePercent($sentimentPayload['short_pct']);
         }
 
         if ($long === null || $short === null) {
@@ -96,16 +98,16 @@ final class SentimentGate
         $long = null;
         $short = null;
         if (isset($sentimentPayload['long']) && is_numeric($sentimentPayload['long'])) {
-            $long = (int) $sentimentPayload['long'];
+            $long = $this->normalizePercent($sentimentPayload['long']);
         }
         if (isset($sentimentPayload['short']) && is_numeric($sentimentPayload['short'])) {
-            $short = (int) $sentimentPayload['short'];
+            $short = $this->normalizePercent($sentimentPayload['short']);
         }
         if ($long === null && isset($sentimentPayload['long_pct']) && is_numeric($sentimentPayload['long_pct'])) {
-            $long = (int) round((float) $sentimentPayload['long_pct']);
+            $long = $this->normalizePercent($sentimentPayload['long_pct']);
         }
         if ($short === null && isset($sentimentPayload['short_pct']) && is_numeric($sentimentPayload['short_pct'])) {
-            $short = (int) round((float) $sentimentPayload['short_pct']);
+            $short = $this->normalizePercent($sentimentPayload['short_pct']);
         }
 
         if ($long === null || $short === null) {
@@ -149,5 +151,24 @@ final class SentimentGate
         } catch (\Throwable $e) {
             // In test contexts the Log facade may not be available; ignore
         }
+    }
+
+    private function normalizePercent(int|float|string $value): int
+    {
+        $decimal = Decimal::of($value);
+        $clamped = $decimal;
+
+        $zero = Decimal::of(0);
+        $hundred = Decimal::of(100);
+
+        if ($clamped->isLessThan($zero)) {
+            $clamped = $zero;
+        }
+
+        if ($clamped->isGreaterThan($hundred)) {
+            $clamped = $hundred;
+        }
+
+        return (int) $clamped->toScale(0, RoundingMode::HALF_UP)->toInt();
     }
 }

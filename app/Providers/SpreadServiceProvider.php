@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Domain\FX\Contracts\SpreadEstimatorContract;
+use App\Domain\FX\DatabaseSpreadEstimator;
 use App\Domain\FX\SpreadEstimator;
 use Illuminate\Support\ServiceProvider;
 
@@ -12,18 +14,19 @@ class SpreadServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->singleton(SpreadEstimator::class, function ($app) {
-            // Resolve IG client - the application already provides IG client bindings elsewhere
+        $this->app->singleton(\App\Domain\FX\Contracts\SpreadEstimatorContract::class, function ($app) {
+            if ($this->backtestEnabled()) {
+                return new DatabaseSpreadEstimator();
+            }
+
             $ig = $app->make(\App\Services\IG\Client::class);
-
-            // Use the default cache repository
             $cache = $app['cache']->store();
-
-            // PSR logger from container
             $logger = $app->make(\Psr\Log\LoggerInterface::class);
 
             return new SpreadEstimator($ig, $cache, $logger);
         });
+
+        $this->app->alias(\App\Domain\FX\Contracts\SpreadEstimatorContract::class, SpreadEstimator::class);
     }
 
     /**
@@ -32,5 +35,10 @@ class SpreadServiceProvider extends ServiceProvider
     public function boot(): void
     {
         // nothing to boot
+    }
+
+    private function backtestEnabled(): bool
+    {
+        return (bool) config('backtest.enabled', false) || env('BACKTEST_MODE', false);
     }
 }

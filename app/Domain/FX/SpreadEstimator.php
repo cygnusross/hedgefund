@@ -2,13 +2,16 @@
 
 namespace App\Domain\FX;
 
+use App\Domain\FX\Contracts\SpreadEstimatorContract;
+use App\Support\Math\Decimal;
+use Brick\Math\RoundingMode;
 use App\Models\Market;
 use App\Services\IG\Client as IgClient;
 use Illuminate\Contracts\Cache\Repository as CacheRepo;
 use Illuminate\Support\Facades\Log as LogFacade;
 use Psr\Log\LoggerInterface;
 
-class SpreadEstimator
+class SpreadEstimator implements SpreadEstimatorContract
 {
     /**
      * @param  callable|null  $marketFinder  function(string $pair): ?object Returns market-like object with 'epic' property
@@ -164,56 +167,124 @@ class SpreadEstimator
             return ['spread' => null, 'status' => $statusNormalized];
         }
 
-        $bid = (float) $snapshot['bid'];
-        $offer = (float) $snapshot['offer'];
+        $rawBid = (float) $snapshot['bid'];
+        $rawOffer = (float) $snapshot['offer'];
 
-        if (! is_finite($bid) || ! is_finite($offer) || $offer <= $bid) {
-            $this->logWarning('invalid_bid_offer', ['pair' => $pair, 'epic' => $epic, 'bid' => $bid, 'offer' => $offer]);
+        if (! is_finite($rawBid) || ! is_finite($rawOffer) || $rawOffer <= $rawBid) {
+            $this->logWarning('invalid_bid_offer', ['pair' => $pair, 'epic' => $epic, 'bid' => $rawBid, 'offer' => $rawOffer]);
 
             return ['spread' => null, 'status' => $statusNormalized];
         }
 
+        $rawBidDecimal = Decimal::of($rawBid);
+        $rawOfferDecimal = Decimal::of($rawOffer);
+        $zeroDecimal = Decimal::of(0);
+        $oneDecimal = Decimal::of(1);
+
+        $priceScale = $this->resolvePriceScale($market, $pair, $body, $rawBid);
+        $priceScaleDecimal = Decimal::of($priceScale);
+
+        if ($priceScaleDecimal->isGreaterThan($oneDecimal)) {
+            $bidDecimal = $rawBidDecimal->dividedBy($priceScaleDecimal, 12, RoundingMode::HALF_UP);
+            $offerDecimal = $rawOfferDecimal->dividedBy($priceScaleDecimal, 12, RoundingMode::HALF_UP);
+        } else {
+            $bidDecimal = $rawBidDecimal;
+            $offerDecimal = $rawOfferDecimal;
+        }
+
         $pipSize = PipMath::pipSize($pair);
-        if (! is_finite($pipSize) || $pipSize <= 0) {
+        $pipSizeDecimal = Decimal::of($pipSize);
+        if ($pipSizeDecimal->isLessThan($zeroDecimal) || $pipSizeDecimal->isZero()) {
             $this->logWarning('invalid_pip_size', ['pair' => $pair, 'epic' => $epic, 'pip_size' => $pipSize]);
 
             return ['spread' => null, 'status' => $statusNormalized];
         }
 
-        // Handle IG Mini contracts that use scaled pricing
-        $rawSpread = $offer - $bid;
-        $actualSpread = $rawSpread;
+        $rawSpreadDecimal = $rawOfferDecimal->minus($rawBidDecimal);
+        $actualSpreadDecimal = $offerDecimal->minus($bidDecimal);
+        $rawSpread = Decimal::toFloat($rawSpreadDecimal, 6);
+        $actualSpread = Decimal::toFloat($actualSpreadDecimal, 6);
 
-        // Detect Mini contracts and Spread Betting contracts that use scaled pricing
-        $instrumentName = $body['instrument']['name'] ?? '';
-        $isScaledContract = str_contains($epic, 'MINI') ||
-            str_contains(strtolower($instrumentName), 'mini') ||
-            str_starts_with($epic, 'CS.D.'); // Spread betting contracts use raw format
+        if ($priceScale <= 1.0) {
+            // Fallback: attempt automatic detection when we didn't have a predefined scale
+            $instrumentName = $body['instrument']['name'] ?? '';
+            $isScaledContract = str_contains($epic, 'MINI') ||
+                str_contains(strtolower($instrumentName), 'mini') ||
+                str_starts_with($epic, 'CS.D.');
 
-        if ($isScaledContract) {
-            // Mini contracts use POINTS-based pricing that needs scaling
-            $scalingFactor = $this->detectMiniContractScalingFactor($pair, $bid);
-            if ($scalingFactor > 1) {
-                $actualSpread = $rawSpread / $scalingFactor;
-                $this->logInfo('mini_contract_scaling_applied', [
-                    'pair' => $pair,
-                    'epic' => $epic,
-                    'raw_spread' => $rawSpread,
-                    'scaling_factor' => $scalingFactor,
-                    'actual_spread' => $actualSpread,
-                ]);
+            if ($isScaledContract) {
+                $detectedScale = $this->detectMiniContractScalingFactor($pair, $rawBid);
+                if ($detectedScale > 1.0) {
+                    $priceScale = $detectedScale;
+                    $priceScaleDecimal = Decimal::of($priceScale);
+                    $bidDecimal = $rawBidDecimal->dividedBy($priceScaleDecimal, 12, RoundingMode::HALF_UP);
+                    $offerDecimal = $rawOfferDecimal->dividedBy($priceScaleDecimal, 12, RoundingMode::HALF_UP);
+                    $actualSpreadDecimal = $offerDecimal->minus($bidDecimal);
+                    $actualSpread = Decimal::toFloat($actualSpreadDecimal, 6);
+                    $this->logInfo('mini_contract_scaling_applied', [
+                        'pair' => $pair,
+                        'epic' => $epic,
+                        'raw_spread' => $rawSpread,
+                        'scaling_factor' => $detectedScale,
+                        'actual_spread' => $actualSpread,
+                    ]);
+                }
             }
         }
 
-        $spread = $actualSpread / $pipSize;
-        if (! is_finite($spread) || $spread <= 0) {
+        if ($actualSpreadDecimal->isLessThan($zeroDecimal) || $actualSpreadDecimal->isZero()) {
+            $this->logWarning('non_positive_spread', [
+                'pair' => $pair,
+                'epic' => $epic,
+                'raw_spread' => $rawSpread,
+                'actual_spread' => $actualSpread,
+                'price_scale' => $priceScale,
+            ]);
+
+            return ['spread' => null, 'status' => $statusNormalized];
+        }
+
+        $spreadDecimal = $actualSpreadDecimal->dividedBy($pipSizeDecimal, 12, RoundingMode::HALF_UP);
+        $spread = Decimal::toFloat($spreadDecimal, 6);
+
+        if ($spreadDecimal->isLessThan($zeroDecimal) || $spreadDecimal->isZero()) {
             $this->logWarning('non_positive_spread', ['pair' => $pair, 'epic' => $epic, 'spread' => $spread]);
 
             return ['spread' => null, 'status' => $statusNormalized];
         }
 
+        $spreadLimitDecimal = Decimal::of(1000);
+        if ($spreadDecimal->isGreaterThan($spreadLimitDecimal)) {
+            $this->logWarning('spread_out_of_range', ['pair' => $pair, 'epic' => $epic, 'spread' => $spread, 'raw_spread' => $actualSpread]);
+
+            return ['spread' => null, 'status' => $statusNormalized];
+        }
+
         // Round to 1 decimal as requested
-        return ['spread' => round($spread, 1), 'status' => $statusNormalized];
+        $spreadRoundedDecimal = $spreadDecimal->toScale(1, RoundingMode::HALF_UP);
+
+        return ['spread' => Decimal::toFloat($spreadRoundedDecimal, 1), 'status' => $statusNormalized];
+    }
+
+    protected function resolvePriceScale(object $market, string $pair, array $body, float $rawBid): float
+    {
+        $scaleFromMarket = null;
+        if (isset($market->price_scale) && is_numeric($market->price_scale)) {
+            $candidate = (float) $market->price_scale;
+            if ($candidate > 1.0) {
+                return $candidate;
+            }
+        }
+
+        $snapshot = $body['snapshot'] ?? [];
+        $snapshotScale = $snapshot['scalingFactor'] ?? null;
+        if (is_numeric($snapshotScale) && (float) $snapshotScale > 1.0) {
+            return (float) $snapshotScale;
+        }
+
+        $detected = $this->detectMiniContractScalingFactor($pair, $rawBid);
+
+        return $detected > 1.0 ? $detected : 1.0;
     }
 
     protected function logWarning(string $reason, array $context = []): void
@@ -258,9 +329,14 @@ class SpreadEstimator
             'AUD-USD' => [0.6, 0.8],
             'EUR/GBP' => [0.8, 0.95],
             'EUR-GBP' => [0.8, 0.95],
+            'NZD/USD' => [0.55, 0.75],
+            'NZD-USD' => [0.55, 0.75],
         ];
 
         $normalizedPair = strtoupper(str_replace(['/', '-'], ['/', '/'], $pair));
+        if (! str_contains($normalizedPair, '/') && strlen($normalizedPair) >= 6) {
+            $normalizedPair = substr($normalizedPair, 0, 3) . '/' . substr($normalizedPair, 3, 3);
+        }
         $altPair = str_replace('/', '-', $normalizedPair);
 
         $expectedRange = $expectedRanges[$normalizedPair] ?? $expectedRanges[$altPair] ?? null;
@@ -274,10 +350,11 @@ class SpreadEstimator
 
         // If IG price is significantly outside expected range, calculate scaling factor
         if ($igPrice > $maxExpected * 10) {
-            $scalingFactor = $igPrice / $midExpected;
+            $scalingDecimal = Decimal::of($igPrice)
+                ->dividedBy(Decimal::of($midExpected), 12, RoundingMode::HALF_UP)
+                ->toScale(0, RoundingMode::HALF_UP);
 
-            // Round to reasonable precision and ensure it's sensible
-            return round($scalingFactor, 0);
+            return Decimal::toFloat($scalingDecimal, 0);
         }
 
         return 1.0; // No scaling needed

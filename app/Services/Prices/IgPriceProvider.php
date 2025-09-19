@@ -3,6 +3,7 @@
 namespace App\Services\Prices;
 
 use App\Domain\Market\Bar;
+use App\Models\Market;
 use App\Services\IG\DTO\HistoricalPricesResponse;
 use App\Services\IG\Endpoints\HistoricalPricesEndpoint;
 use App\Services\IG\Enums\Resolution;
@@ -22,8 +23,8 @@ class IgPriceProvider implements PriceProvider
     public function getCandles(string $symbol, array $params = []): array
     {
         try {
-            // Convert symbol to IG epic format if needed
-            $epic = $this->symbolToEpic($symbol);
+            // Attempt to resolve epic from stored Market metadata first (preferred)
+            $epic = $this->resolveEpic($symbol);
 
             // Get resolution from params or use default
             $interval = $params['interval'] ?? '5min';
@@ -42,7 +43,7 @@ class IgPriceProvider implements PriceProvider
             $bars = $historicalPricesResponse->toBars();
 
             // Sort oldest to newest (IG typically returns newest first)
-            usort($bars, fn(Bar $a, Bar $b) => $a->ts <=> $b->ts);
+            usort($bars, fn (Bar $a, Bar $b) => $a->ts <=> $b->ts);
 
             Log::info('IG price data retrieved successfully', [
                 'epic' => $epic,
@@ -72,12 +73,19 @@ class IgPriceProvider implements PriceProvider
      * GBP/USD -> CS.D.GBPUSD.MINI.IP
      * USD/JPY -> CS.D.USDJPY.MINI.IP
      */
-    protected function symbolToEpic(string $symbol): string
+    protected function resolveEpic(string $symbol): string
     {
+        $normalized = strtoupper(str_replace(' ', '', $symbol));
+        $market = Market::where('symbol', $symbol)->orWhere('symbol', $normalized)->orWhere('name', $symbol)->first();
+        if ($market && $market->epic) {
+            return $market->epic;
+        }
+
         // Handle forex pairs
         if (str_contains($symbol, '/')) {
             $pair = str_replace('/', '', $symbol);
-            return "CS.D.{$pair}.MINI.IP";
+
+            return "CS.D.{$pair}.TODAY.IP";
         }
 
         // If already in epic format, return as-is
@@ -85,8 +93,8 @@ class IgPriceProvider implements PriceProvider
             return $symbol;
         }
 
-        // Default forex mini epic format
-        return "CS.D.{$symbol}.MINI.IP";
+        // Default forex TODAY epic format
+        return "CS.D.{$symbol}.TODAY.IP";
     }
 
     /**
@@ -103,7 +111,7 @@ class IgPriceProvider implements PriceProvider
 
             // Add slash for forex pairs (6 characters)
             if (strlen($pair) === 6) {
-                return substr($pair, 0, 3) . '/' . substr($pair, 3, 3);
+                return substr($pair, 0, 3).'/'.substr($pair, 3, 3);
             }
         }
 

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Risk;
 
+use App\Support\Math\Decimal;
+use Brick\Math\RoundingMode;
+
 final class Sizing
 {
     /**
@@ -22,15 +25,28 @@ final class Sizing
             return 0.0;
         }
 
-        $riskAmount = $sleeveBalance * ($riskPct / 100.0);
+        $balanceDecimal = Decimal::of($sleeveBalance);
+        $riskPctDecimal = Decimal::of($riskPct)->dividedBy(Decimal::of(100), 12, RoundingMode::HALF_UP);
+        $riskAmount = $balanceDecimal->multipliedBy($riskPctDecimal);
 
-        // raw size (contracts/units) that would produce riskAmount for given sl and pip value
-        $rawSize = $riskAmount / ($slPips * $pipValue);
+        $slPipsDecimal = Decimal::of($slPips);
+        $pipValueDecimal = Decimal::of($pipValue);
+        $denominator = $slPipsDecimal->multipliedBy($pipValueDecimal);
 
-        // Round down to nearest size step (avoid oversizing risk)
-        $rounded = floor($rawSize / $sizeStep) * $sizeStep;
+        if ($denominator->isZero()) {
+            return 0.0;
+        }
 
-        // Don't return negative
-        return max(0.0, round($rounded, 12));
+        $rawSize = $riskAmount->dividedBy($denominator, 12, RoundingMode::HALF_UP);
+
+        $sizeStepDecimal = Decimal::of($sizeStep);
+        if ($sizeStepDecimal->isZero()) {
+            return 0.0;
+        }
+
+        $steps = $rawSize->dividedBy($sizeStepDecimal, 12, RoundingMode::DOWN)->toScale(0, RoundingMode::DOWN);
+        $rounded = $steps->multipliedBy($sizeStepDecimal);
+
+        return max(0.0, Decimal::toFloat($rounded, 12));
     }
 }

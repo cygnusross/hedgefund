@@ -1,64 +1,92 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Domain\Decision;
 
+use App\Domain\Decision\Contracts\DecisionContextContract;
+use App\Domain\Decision\DTO\DecisionMetadata;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Market\FeatureSet;
 
-// Use fully-qualified DateTime classes to avoid non-compound use statement warnings
-
-/**
- * Immutable context passed to decision logic.
- */
-final class DecisionContext
+final class DecisionContext implements DecisionContextContract
 {
+    private readonly DecisionMetadata $meta;
+
     public function __construct(
-        public readonly string $pair,
-        public readonly \DateTimeImmutable $ts,
-        public readonly FeatureSet $features,
-        // Optional meta fields (provenance, freshness) passed from ContextBuilder
-        public readonly array $meta = [],
+        private readonly string $pair,
+        private readonly \DateTimeImmutable $ts,
+        private readonly FeatureSet $features,
+        ?DecisionMetadata $meta = null,
     ) {
-        // Intentionally immutable; no side-effects.
+        $this->meta = $meta ?? new DecisionMetadata;
     }
 
-    /**
-     * Return a concise array representation including flattened features.
-     * Context-specific fields like 'news', 'calendar', and 'blackout' are added by callers (e.g. ContextBuilder).
-     */
+    public function pair(): string
+    {
+        return $this->pair;
+    }
+
+    public function timestamp(): \DateTimeImmutable
+    {
+        return $this->ts;
+    }
+
+    public function features(): FeatureSet
+    {
+        return $this->features;
+    }
+
+    public function meta(): DecisionMetadata
+    {
+        return $this->meta;
+    }
+
+    public function toRequest(): DecisionRequest
+    {
+        return DecisionRequest::fromArray($this->toArray());
+    }
+
     public function toArray(): array
     {
         return [
             'pair' => $this->pair,
             'ts' => $this->ts->format(DATE_ATOM),
-            'features' => [
-                'ema20' => $this->features->ema20,
-                'ema20_z' => $this->features->ema20_z,
-                'atr5m' => $this->features->atr5m,
-                'adx5m' => $this->features->adx5m,
-                'recentRangePips' => $this->features->recentRangePips,
-                'trend30m' => $this->features->trend30m,
-                'supportLevels' => $this->features->supportLevels,
-                'resistanceLevels' => $this->features->resistanceLevels,
-                // New momentum indicators
-                'rsi14' => $this->features->rsi14,
-                'macd_line' => $this->features->macd_line,
-                'macd_signal' => $this->features->macd_signal,
-                'macd_histogram' => $this->features->macd_histogram,
-                'bb_upper' => $this->features->bb_upper,
-                'bb_middle' => $this->features->bb_middle,
-                'bb_lower' => $this->features->bb_lower,
-                'stoch_k' => $this->features->stoch_k,
-                'stoch_d' => $this->features->stoch_d,
-                'williamsR' => $this->features->williamsR,
-                'cci' => $this->features->cci,
-                'parabolicSAR' => $this->features->parabolicSAR,
-                'parabolicSARTrend' => $this->features->parabolicSARTrend,
-                'tr_upper' => $this->features->tr_upper,
-                'tr_middle' => $this->features->tr_middle,
-                'tr_lower' => $this->features->tr_lower,
-            ],
-            // Add meta block for provenance and freshness information; empty when not provided
-            'meta' => $this->meta,
+            'features' => $this->featuresToArray($this->features),
+            'meta' => $this->meta->toArray(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function featuresToArray(FeatureSet $features): array
+    {
+        return [
+            'ema20' => $features->ema20,
+            'ema20_z' => $features->ema20_z,
+            'atr5m' => $features->atr5m,
+            'adx5m' => $features->adx5m,
+            'recentRangePips' => $features->recentRangePips,
+            'trend30m' => $features->trend30m,
+            'supportLevels' => $features->supportLevels,
+            'resistanceLevels' => $features->resistanceLevels,
+            'rsi14' => $features->rsi14,
+            'macd_line' => $features->macd_line,
+            'macd_signal' => $features->macd_signal,
+            'macd_histogram' => $features->macd_histogram,
+            'bb_upper' => $features->bb_upper,
+            'bb_middle' => $features->bb_middle,
+            'bb_lower' => $features->bb_lower,
+            'stoch_k' => $features->stoch_k,
+            'stoch_d' => $features->stoch_d,
+            'williamsR' => $features->williamsR,
+            'cci' => $features->cci,
+            'parabolicSAR' => $features->parabolicSAR,
+            'parabolicSARTrend' => $features->parabolicSARTrend,
+            'tr_upper' => $features->tr_upper,
+            'tr_middle' => $features->tr_middle,
+            'tr_lower' => $features->tr_lower,
         ];
     }
 }

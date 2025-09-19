@@ -13,7 +13,7 @@ uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Cache::flush();
-    $this->service = new NewsService();
+    $this->service = new NewsService;
 });
 
 it('falls back to database when cache misses and rebuilds cache', function () {

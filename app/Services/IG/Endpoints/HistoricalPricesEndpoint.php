@@ -10,9 +10,9 @@ class HistoricalPricesEndpoint extends BaseEndpoint
     /**
      * Get historical prices for the given epic, resolution and number of data points.
      *
-     * @param string $epic Instrument epic
-     * @param Resolution|string $resolution Price resolution
-     * @param int $numPoints Number of data points required
+     * @param  string  $epic  Instrument epic
+     * @param  Resolution|string  $resolution  Price resolution
+     * @param  int  $numPoints  Number of data points required
      * @return array Raw API response
      */
     public function get(string $epic, Resolution|string $resolution, int $numPoints): array

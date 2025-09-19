@@ -8,6 +8,9 @@ use App\Domain\FX\PipMath;
 use App\Domain\Indicators\Indicators;
 use App\Domain\Market\Bar;
 use App\Domain\Market\FeatureSet;
+use Ds\Vector;
+use App\Support\Math\Decimal;
+use Brick\Math\RoundingMode;
 
 // Use fully-qualified DateTime classes to avoid non-compound use statement warnings
 
@@ -57,15 +60,15 @@ final class FeatureEngine
         $ema20_z = Indicators::emaZ($slice5, $neededEma, $neededEma) ?? 0.0;
         // get recent price range then convert to pips using PipMath
         $recentRangePrice = Indicators::recentRangePrice($slice5, 360);
-        $rawPips = PipMath::toPips($recentRangePrice, $pair);
+        $rawPipsDecimal = Decimal::of(PipMath::toPips($recentRangePrice, $pair));
         // JPY pairs typically use 2 decimal places in price (pip = 0.01) but reporting
         // pips with 1 decimal is more useful; other pairs can be integers for RR checks
         $parts = preg_split('/[\/\-]/', $pair);
         $quote = isset($parts[1]) ? strtoupper($parts[1]) : '';
         if ($quote === 'JPY') {
-            $recentRangePips = round($rawPips, 1);
+            $recentRangePips = Decimal::toFloat($rawPipsDecimal->toScale(1, RoundingMode::HALF_UP), 1);
         } else {
-            $recentRangePips = (float) round($rawPips);
+            $recentRangePips = Decimal::toFloat($rawPipsDecimal->toScale(0, RoundingMode::HALF_UP), 0);
         }
 
         // Stage 2.5: compute ADX on 5m
@@ -93,27 +96,29 @@ final class FeatureEngine
         $lastPrice = $lastBar ? $lastBar->close : null;
 
         // Split and order supports/resistances relative to last price
-        $supports = [];
-        $resists = [];
+        $supports = new Vector();
+        $resists = new Vector();
         if (is_numeric($lastPrice)) {
             foreach ($rawSupports as $s) {
                 if ($s < $lastPrice) {
-                    $supports[] = $s;
+                    $supports->push($s);
                 }
             }
             foreach ($rawResists as $r) {
                 if ($r > $lastPrice) {
-                    $resists[] = $r;
+                    $resists->push($r);
                 }
             }
 
             // Sort supports descending (closest-first), resistances ascending (closest-first)
-            rsort($supports, SORT_NUMERIC);
-            sort($resists, SORT_NUMERIC);
+            $supportValues = $supports->toArray();
+            rsort($supportValues, SORT_NUMERIC);
+            $resistValues = $resists->toArray();
+            sort($resistValues, SORT_NUMERIC);
 
             // Limit to top 3 each
-            $supportLevels = array_slice($supports, 0, 3);
-            $resistanceLevels = array_slice($resists, 0, 3);
+            $supportLevels = array_slice($supportValues, 0, 3);
+            $resistanceLevels = array_slice($resistValues, 0, 3);
         } else {
             // Fallback to raw values if last price not available
             $supportLevels = array_slice($rawSupports, 0, 3);

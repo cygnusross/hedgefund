@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Domain\FX\SpreadEstimator;
+use App\Domain\FX\Contracts\SpreadEstimatorContract;
 use App\Models\Market;
 use App\Models\Spread;
 use Carbon\Carbon;
@@ -16,7 +16,7 @@ class SpreadsRecordCurrent extends Command
     protected $description = 'Record current spread data for all markets';
 
     public function __construct(
-        protected SpreadEstimator $spreadEstimator
+        protected SpreadEstimatorContract $spreadEstimator
     ) {
         parent::__construct();
     }

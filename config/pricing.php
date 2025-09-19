@@ -1,7 +1,14 @@
 <?php
 
 return [
-    'driver' => env('PRICE_DRIVER', 'twelvedata'),
+    'driver' => env('PRICE_DRIVER', 'ig'),
+
+    'bootstrap_limit_5min' => env('PRICING_BOOTSTRAP_5M', 150),
+    'bootstrap_limit_30min' => env('PRICING_BOOTSTRAP_30M', 30),
+    'tail_fetch_limit_5min' => env('PRICING_TAIL_5M', 20),
+    'tail_fetch_limit_30min' => env('PRICING_TAIL_30M', 12),
+    'overlap_bars_5min' => env('PRICING_OVERLAP_5M', 3),
+    'overlap_bars_30min' => env('PRICING_OVERLAP_30M', 2),
 
     'twelvedata' => [
         'base_url' => env('TWELVEDATA_BASE_URL', 'https://api.twelvedata.com'),
@@ -19,18 +26,6 @@ return [
 
     'ig' => [
         'timeout' => env('IG_TIMEOUT', 10),
-        // IG uses epic format like CS.D.EURUSD.MINI.IP instead of symbols
-        'symbol_map' => [
-            'EUR/USD' => 'CS.D.EURUSD.MINI.IP',
-            'GBP/USD' => 'CS.D.GBPUSD.MINI.IP',
-            'USD/JPY' => 'CS.D.USDJPY.MINI.IP',
-            'AUD/USD' => 'CS.D.AUDUSD.MINI.IP',
-            'USD/CAD' => 'CS.D.USDCAD.MINI.IP',
-            'USD/CHF' => 'CS.D.USDCHF.MINI.IP',
-            'EUR/GBP' => 'CS.D.EURGBP.MINI.IP',
-            'EUR/JPY' => 'CS.D.EURJPY.MINI.IP',
-            'GBP/JPY' => 'CS.D.GBPJPY.MINI.IP',
-        ],
         'resolution_map' => [
             '1min' => 'MINUTE',
             '5min' => 'MINUTE_5',

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Domain\Market\Bar;
 use App\Services\IG\DTO\HistoricalPrice;
 use App\Services\IG\DTO\Price;
-use App\Domain\Market\Bar;
 
 it('creates HistoricalPrice from array data', function () {
     $data = [
@@ -76,6 +76,6 @@ it('throws exception for invalid snapshot time format', function () {
 
     $historicalPrice = HistoricalPrice::fromArray($data);
 
-    expect(fn() => $historicalPrice->toBar())
+    expect(fn () => $historicalPrice->toBar())
         ->toThrow(\InvalidArgumentException::class, 'Invalid snapshot time format');
 });

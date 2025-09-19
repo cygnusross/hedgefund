@@ -24,7 +24,7 @@ it('uses NewsService when provided', function () {
             if ($interval === '5min') {
                 // create 30 bars, 5min apart
                 for ($i = 0; $i < 30; $i++) {
-                    $ts = $now->modify('-' . (5 * (29 - $i)) . ' minutes');
+                    $ts = $now->modify('-'.(5 * (29 - $i)).' minutes');
                     $open = 1.1000 + ($i * 0.0001);
                     $close = $open + 0.00005;
                     $bars[] = new Bar($ts, $open, $open + 0.0001, $open - 0.0001, $close, 1000);
@@ -32,7 +32,7 @@ it('uses NewsService when provided', function () {
             } else {
                 // 30m bars: create 30 bars, 30min apart
                 for ($i = 0; $i < 30; $i++) {
-                    $ts = $now->modify('-' . (30 * (29 - $i)) . ' minutes');
+                    $ts = $now->modify('-'.(30 * (29 - $i)).' minutes');
                     $open = 1.1000 + ($i * 0.0002);
                     $close = $open + 0.0001;
                     $bars[] = new Bar($ts, $open, $open + 0.0002, $open - 0.0002, $close, 1000);
@@ -115,19 +115,20 @@ it('falls back to old logic when NewsService not provided', function () {
             $now = new \DateTimeImmutable('2025-09-12T12:00:00+00:00');
             if ($interval === '5min') {
                 for ($i = 0; $i < 30; $i++) {
-                    $ts = $now->modify('-' . (5 * (29 - $i)) . ' minutes');
+                    $ts = $now->modify('-'.(5 * (29 - $i)).' minutes');
                     $open = 1.1000 + ($i * 0.0001);
                     $close = $open + 0.00005;
                     $bars[] = new Bar($ts, $open, $open + 0.0001, $open - 0.0001, $close, 1000);
                 }
             } else {
                 for ($i = 0; $i < 30; $i++) {
-                    $ts = $now->modify('-' . (30 * (29 - $i)) . ' minutes');
+                    $ts = $now->modify('-'.(30 * (29 - $i)).' minutes');
                     $open = 1.1000 + ($i * 0.0002);
                     $close = $open + 0.0001;
                     $bars[] = new Bar($ts, $open, $open + 0.0002, $open - 0.0002, $close, 1000);
                 }
             }
+
             return $bars;
         }
     };

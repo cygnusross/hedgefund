@@ -13,6 +13,23 @@ TASK: Bind the ClientSentimentProvider via the container so tests can mock it.
 
 namespace App\Providers;
 
+use App\Application\Candles\DatabaseCandleProvider;
+use App\Domain\Decision\Contracts\DecisionContextContract;
+use App\Domain\Decision\Contracts\LiveDecisionEngineContract;
+use App\Domain\Decision\DecisionContext;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Execution\PositionLedgerContract;
+use App\Domain\Rules\AlphaRules;
+use App\Domain\Sentiment\Contracts\SentimentProvider as SentimentProviderContract;
+use App\Support\Clock\ClockInterface;
+use App\Support\Clock\SystemClock;
+use App\Domain\Market\Contracts\MarketStatusProvider as MarketStatusProviderContract;
+use App\Services\IG\ClientSentimentProvider as IgSentimentProvider;
+use App\Services\Economic\DatabaseEconomicCalendarProvider;
+use App\Services\MarketStatus\DatabaseMarketStatusProvider;
+use App\Services\MarketStatus\IgMarketStatusProvider;
+use App\Services\Prices\DatabasePriceProvider;
+use App\Services\Sentiment\DatabaseSentimentProvider;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -24,7 +41,9 @@ class AppServiceProvider extends ServiceProvider
     {
         // Bind the PriceProvider implementation based on config/pricing.php
         $this->app->singleton(\App\Services\Prices\PriceProvider::class, function ($app) {
-            $driver = config('pricing.driver', 'twelvedata');
+            $driver = $this->backtestEnabled()
+                ? 'database'
+                : config('pricing.driver', 'twelvedata');
 
             return match ($driver) {
                 'twelvedata' => new \App\Services\Prices\TwelveDataProvider(
@@ -33,6 +52,9 @@ class AppServiceProvider extends ServiceProvider
                     (int) config('pricing.twelvedata.timeout', 8),
                 ),
                 'ig' => $app->make(\App\Services\Prices\IgPriceProvider::class),
+                'database' => new \App\Services\Prices\DatabasePriceProvider(
+                    $app->make(\App\Application\Candles\DatabaseCandleProvider::class)
+                ),
                 default => throw new \RuntimeException("Unknown price provider [{$driver}] configured in config/pricing.php"),
             };
         });
@@ -59,19 +81,28 @@ class AppServiceProvider extends ServiceProvider
 
         // Bind the EconomicCalendarProvider for fetching/caching economic calendar data
         $this->app->singleton(\App\Services\Economic\EconomicCalendarProvider::class, function ($app) {
+            if ($this->backtestEnabled()) {
+                return new DatabaseEconomicCalendarProvider();
+            }
+
             return new \App\Services\Economic\EconomicCalendarProvider;
         });
 
-        // Bind the EconomicCalendarProviderContract to the concrete implementation
         $this->app->bind(
             \App\Services\Economic\EconomicCalendarProviderContract::class,
-            fn($app) => $app->make(\App\Services\Economic\EconomicCalendarProvider::class)
+            fn ($app) => $app->make(\App\Services\Economic\EconomicCalendarProvider::class)
         );
 
         // Bind CandleUpdaterContract to the IncrementalCandleUpdater so it can be injected by interface
         $this->app->bind(
             \App\Application\Candles\CandleUpdaterContract::class,
-            fn($app) => $app->make(\App\Application\Candles\IncrementalCandleUpdater::class)
+            function ($app) {
+                if ($this->backtestEnabled()) {
+                    return $app->make(\App\Application\Candles\DatabaseCandleProvider::class);
+                }
+
+                return $app->make(\App\Application\Candles\IncrementalCandleUpdater::class);
+            }
         );
 
         // Bind CandleCache contract to adapter for DI
@@ -80,10 +111,24 @@ class AppServiceProvider extends ServiceProvider
             \App\Infrastructure\Prices\CandleCacheAdapter::class
         );
 
+        $this->app->bind(DecisionContextContract::class, DecisionContext::class);
+
+        $this->app->singleton(ClockInterface::class, SystemClock::class);
+
+        $this->app->bind(LiveDecisionEngineContract::class, function ($app) {
+            $rules = $app->make(AlphaRules::class);
+            $clock = $app->make(ClockInterface::class);
+            $ledger = $app->bound(PositionLedgerContract::class)
+                ? $app->make(PositionLedgerContract::class)
+                : null;
+
+            return new LiveDecisionEngine($rules, $clock, $ledger);
+        });
+
         // Bind AlphaRules loader as a singleton
-        $this->app->singleton(\App\Domain\Rules\AlphaRules::class, function ($app) {
+        $this->app->singleton(AlphaRules::class, function ($app) {
             $path = env('RULES_YAML_PATH', storage_path('app/alpha_rules.yaml'));
-            $rules = new \App\Domain\Rules\AlphaRules($path);
+            $rules = new AlphaRules($path);
             // Attempt initial load but do not fail bootstrap if file absent; let reload() throw when called explicitly
             try {
                 $rules->reload();
@@ -95,15 +140,33 @@ class AppServiceProvider extends ServiceProvider
             return $rules;
         });
 
-        // Bind ClientSentimentProvider for DI and easier test mocking
-        $this->app->bind(\App\Services\IG\ClientSentimentProvider::class, function ($app) {
-            return new \App\Services\IG\ClientSentimentProvider(
+        $this->app->bind(IgSentimentProvider::class, function ($app) {
+            return new IgSentimentProvider(
                 $app->make(\App\Services\IG\Endpoints\ClientSentimentEndpoint::class),
                 $app->make(\Illuminate\Contracts\Cache\Repository::class)
             );
         });
 
-        // Bind PositionLedgerContract to a NullPositionLedger by default so DecisionEngine can resolve it
+        $this->app->bind(SentimentProviderContract::class, function ($app) {
+            if ($this->backtestEnabled()) {
+                return $app->make(\App\Services\Sentiment\DatabaseSentimentProvider::class);
+            }
+
+            return $app->make(IgSentimentProvider::class);
+        });
+
+        $this->app->bind(MarketStatusProviderContract::class, function ($app) {
+            if ($this->backtestEnabled()) {
+                return $app->make(\App\Services\MarketStatus\DatabaseMarketStatusProvider::class);
+            }
+
+            return new IgMarketStatusProvider(
+                $app->make(\App\Services\IG\Endpoints\MarketsEndpoint::class),
+                $app['cache']->store()
+            );
+        });
+
+        // Bind PositionLedgerContract to a NullPositionLedger by default so LiveDecisionEngine can resolve it
         $this->app->bind(\App\Domain\Execution\PositionLedgerContract::class, function ($app) {
             return new \App\Domain\Execution\NullPositionLedger;
         });
@@ -115,6 +178,11 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(\App\Services\IG\Endpoints\WorkingOrdersOtcEndpoint::class)
             );
         });
+    }
+
+    private function backtestEnabled(): bool
+    {
+        return (bool) config('backtest.enabled', false) || env('BACKTEST_MODE', false);
     }
 
     /**

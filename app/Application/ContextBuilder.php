@@ -4,18 +4,18 @@ namespace App\Application;
 
 use App\Application\Calendar\CalendarLookup;
 use App\Application\Candles\CandleUpdaterContract;
-use App\Application\News\NewsCacheKeyStrategy;
-use App\Application\News\NewsServiceInterface;
 use App\Domain\Decision\DecisionContext;
+use App\Domain\Decision\DTO\DecisionMetadata;
 use App\Domain\Features\FeatureEngine;
 use App\Domain\FX\PipMath;
-use App\Domain\FX\SpreadEstimator;
+use App\Support\Math\Decimal;
+use Brick\Math\RoundingMode;
+use App\Domain\FX\Contracts\SpreadEstimatorContract;
+use App\Domain\Market\Contracts\MarketStatusProvider;
 use App\Models\Account;
 use App\Models\Market;
-use App\Services\IG\ClientSentimentProvider;
+use App\Domain\Sentiment\Contracts\SentimentProvider;
 use App\Services\IG\Endpoints\MarketsEndpoint;
-use Illuminate\Contracts\Cache\Repository as CacheRepository;
-use Illuminate\Support\Facades\Cache;
 // Use fully-qualified DateTime classes to avoid non-compound use statement warnings
 use Illuminate\Support\Facades\Log;
 
@@ -41,11 +41,10 @@ class ContextBuilder
     public function __construct(
         public CandleUpdaterContract $updater,
         public CalendarLookup $calendar,
-        public ?SpreadEstimator $spreadEstimator = null,
-        public ?ClientSentimentProvider $sentimentProvider = null,
+        public ?SpreadEstimatorContract $spreadEstimator = null,
+        public ?SentimentProvider $sentimentProvider = null,
         public ?MarketsEndpoint $markets = null,
-        public ?CacheRepository $cacheRepo = null,
-        public ?NewsServiceInterface $newsService = null
+        public ?MarketStatusProvider $marketStatusProvider = null
     ) {}
 
     /**
@@ -58,92 +57,23 @@ class ContextBuilder
         // Resolve bootstrap limits from config (safe keys)
         $limit5 = (int) (config('pricing.bootstrap_limit_5min') ?? config('pricing.bootstrap_limit') ?? 500);
         $limit30 = (int) (config('pricing.bootstrap_limit_30min') ?? config('pricing.bootstrap_limit') ?? 500);
+        $overlap5 = (int) (config('pricing.overlap_bars_5min') ?? 2);
+        $overlap30 = (int) (config('pricing.overlap_bars_30min') ?? 2);
+        $tail5 = (int) (config('pricing.tail_fetch_limit_5min') ?? 200);
+        $tail30 = (int) (config('pricing.tail_fetch_limit_30min') ?? 200);
 
-        $bars5 = $this->updater->sync($pair, '5min', $limit5);
-        $bars30 = $this->updater->sync($pair, '30min', $limit30);
+        $bars5 = $this->updater->sync($pair, '5min', $limit5, $overlap5, $tail5);
+        $bars30 = $this->updater->sync($pair, '30min', $limit30, $overlap30, $tail30);
 
         // Ensure oldest->newest
-        usort($bars5, fn($a, $b) => $a->ts <=> $b->ts);
-        usort($bars30, fn($a, $b) => $a->ts <=> $b->ts);
+        usort($bars5, fn ($a, $b) => $a->ts <=> $b->ts);
+        usort($bars30, fn ($a, $b) => $a->ts <=> $b->ts);
 
         // Cut both to ts <= $ts (no look-ahead)
-        $bars5 = array_values(array_filter($bars5, fn($b) => $b->ts <= $ts));
-        $bars30 = array_values(array_filter($bars30, fn($b) => $b->ts <= $ts));
+        $bars5 = array_values(array_filter($bars5, fn ($b) => $b->ts <= $ts));
+        $bars30 = array_values(array_filter($bars30, fn ($b) => $b->ts <= $ts));
 
         return ['bars5' => $bars5, 'bars30' => $bars30];
-    }
-
-    /**
-     * Resolve the news date parameter from various inputs.
-     *
-     * @return array{dateParam: string, statDate: string}
-     */
-    private function resolveNewsDate(mixed $newsDateOrDays, \DateTimeImmutable $ts): array
-    {
-        // Config-driven values (allow caller to override via $newsDateOrDays)
-        $newsDays = is_int($newsDateOrDays) ? $newsDateOrDays : (int) config('decision.news_days', 1);
-        $blackoutMinutes = (int) config('decision.blackout_minutes_high', 60);
-
-        // Determine date parameter for stats: allow explicit string override via $newsDateOrDays
-        if (is_string($newsDateOrDays) && $newsDateOrDays !== '') {
-            $dateParam = $newsDateOrDays;
-        } else {
-            // default 'today'; if $ts is before today UTC, use the ts date
-            $todayUtc = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-            $todayDate = $todayUtc->format('Y-m-d');
-            $tsDate = $ts->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d');
-            $dateParam = $tsDate < $todayDate ? $tsDate : 'today';
-        }
-
-        // Resolve date parameter to explicit date for cache lookup
-        $statDate = $dateParam === 'today' ? (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d') : $dateParam;
-
-        return ['dateParam' => $dateParam, 'statDate' => $statDate];
-    }
-
-    /**
-     * Get news data using the NewsService.
-     */
-    private function getNewsFromService(string $pair, string $statDate): array
-    {
-        $newsData = $this->newsService->getNews($pair, $statDate);
-
-        $rawScore = $newsData->rawScore;
-        $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
-
-        return [
-            'direction' => $direction,
-            'strength' => $newsData->strength,
-            'counts' => $newsData->counts,
-            'raw_score' => $rawScore,
-            'date' => $newsData->date,
-        ];
-    }
-
-    /**
-     * Get news data using fallback cache/database logic.
-     */
-    private function getNewsFromCache(string $pair, string $statDate): array
-    {
-        $cacheKey = NewsCacheKeyStrategy::statKey($pair, $statDate);
-        $newsData = Cache::get($cacheKey);
-
-        if ($newsData !== null && isset($newsData['raw_score'])) {
-            // Process cached API response data to match expected context format
-            $rawScore = (float) ($newsData['raw_score'] ?? 0.0);
-            $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
-
-            return [
-                'direction' => $direction,
-                'strength' => (float) ($newsData['strength'] ?? 0.0),
-                'counts' => $newsData['counts'] ?? ['pos' => 0, 'neg' => 0, 'neu' => 0],
-                'raw_score' => $rawScore,
-                'date' => $statDate,
-            ];
-        }
-
-        // Cache miss - try to rebuild from database
-        return $this->rebuildNewsFromDatabase($pair, $statDate, $cacheKey);
     }
 
     /**
@@ -180,7 +110,7 @@ class ContextBuilder
                 'counts' => $counts,
             ];
             $ttl = NewsCacheKeyStrategy::getTtl($statDate);
-            Cache::put($cacheKey, $cacheData, $ttl);
+            $this->putInCache($cacheKey, $cacheData, $ttl);
 
             $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
 
@@ -201,18 +131,6 @@ class ContextBuilder
             'raw_score' => 0.0,
             'date' => $statDate,
         ];
-    }
-
-    /**
-     * Retrieve news data using NewsService if available, otherwise fallback to cache/database.
-     */
-    private function getNewsData(string $pair, string $statDate): array
-    {
-        if ($this->newsService !== null) {
-            return $this->getNewsFromService($pair, $statDate);
-        }
-
-        return $this->getNewsFromCache($pair, $statDate);
     }
 
     /**
@@ -297,13 +215,13 @@ class ContextBuilder
             $market = Market::where('symbol', $pair)->first();
             $epic = $market && $market->epic ? $market->epic : strtoupper(str_replace('/', '-', $pair));
 
-            $cacheKey = 'ig:marketStatus:' . $epic;
-            $marketIdCacheKey = 'ig:marketId:' . $epic;
+            $cacheKey = 'ig:marketStatus:'.$epic;
+            $marketIdCacheKey = 'ig:marketId:'.$epic;
 
             // Prefer injected cache repository when available (easier to test); otherwise use the facade
-            $igMarketStatus = $this->cacheRepo ? $this->cacheRepo->get($cacheKey) : Cache::get($cacheKey);
+            $igMarketStatus = $this->getFromCache($cacheKey);
             // Attempt to read a previously cached IG marketId for this epic (24h TTL)
-            $cachedMarketId = $this->cacheRepo ? $this->cacheRepo->get($marketIdCacheKey) : Cache::get($marketIdCacheKey);
+            $cachedMarketId = $this->getFromCache($marketIdCacheKey);
 
             if ($igMarketStatus === null) {
                 // Prefer injected markets endpoint when provided for testability
@@ -333,15 +251,7 @@ class ContextBuilder
                 $respMarketId = $resp['instrument']['marketId'] ?? null;
                 if (is_string($respMarketId) && $respMarketId !== '') {
                     $cachedMarketId = $respMarketId;
-                    try {
-                        if ($this->cacheRepo) {
-                            $this->cacheRepo->put($marketIdCacheKey, $cachedMarketId, 24 * 60 * 60);
-                        } else {
-                            Cache::put($marketIdCacheKey, $cachedMarketId, 24 * 60 * 60);
-                        }
-                    } catch (\Throwable $e) {
-                        // non-fatal - proceed without caching
-                    }
+                    $this->putInCache($marketIdCacheKey, $cachedMarketId, 24 * 60 * 60);
                 }
 
                 if (is_string($status) && $status !== '') {
@@ -351,11 +261,7 @@ class ContextBuilder
                 }
 
                 try {
-                    if ($this->cacheRepo) {
-                        $this->cacheRepo->put($cacheKey, $igMarketStatus, 30);
-                    } else {
-                        Cache::put($cacheKey, $igMarketStatus, 30);
-                    }
+                    $this->putInCache($cacheKey, $igMarketStatus, 30);
                 } catch (\Throwable $e) {
                     // ignore cache failures
                 }
@@ -417,7 +323,11 @@ class ContextBuilder
         $lastPrice = $tail5 instanceof \App\Domain\Market\Bar ? (float) $tail5->close : null;
         // Convert atr5m to pips using helper that handles JPY pairs
         $atr5m = $featureSet->atr5m ?? null;
-        $atr5mPips = is_numeric($atr5m) ? round(PipMath::toPips((float) $atr5m, $pair), 1) : null;
+        $atr5mPips = null;
+        if (is_numeric($atr5m)) {
+            $atrPipsDecimal = Decimal::of(PipMath::toPips((float) $atr5m, $pair))->toScale(1, RoundingMode::HALF_UP);
+            $atr5mPips = Decimal::toFloat($atrPipsDecimal, 1);
+        }
 
         // Start with basic market metadata
         $marketMeta = [
@@ -444,10 +354,21 @@ class ContextBuilder
         $marketMeta['status'] = $marketStatus;
 
         // Fetch IG market status and quote age
-        $igInfo = $this->fetchIgMarketStatus($pair, $nowUtc);
-        $igMarketStatus = $igInfo['igMarketStatus'];
-        $igMarketQuoteAge = $igInfo['igMarketQuoteAge'];
-        $cachedMarketId = $igInfo['cachedMarketId'];
+        if ($this->marketStatusProvider !== null) {
+            $statusInfo = $this->marketStatusProvider->fetch($pair, $nowUtc, $opts);
+            $igMarketStatus = $statusInfo['status'] ?? null;
+            $igMarketQuoteAge = $statusInfo['quote_age_sec'] ?? null;
+            $cachedMarketId = $statusInfo['market_id'] ?? null;
+        } else {
+            $statusInfo = $this->fetchIgMarketStatus($pair, $nowUtc);
+            $igMarketStatus = $statusInfo['igMarketStatus'];
+            $igMarketQuoteAge = $statusInfo['igMarketQuoteAge'];
+            $cachedMarketId = $statusInfo['cachedMarketId'];
+        }
+
+        if ($igMarketStatus === null) {
+            $igMarketStatus = 'UNKNOWN';
+        }
 
         // Expose the canonical IG market id when we resolved one (may be null)
         $marketMeta['market_id'] = is_string($cachedMarketId) ? $cachedMarketId : null;
@@ -507,6 +428,26 @@ class ContextBuilder
 
         // Attach client sentiment if available via provider (may be null)
         $market = Market::where('symbol', $pair)->first();
+
+        if ($market !== null) {
+            $gateOverrides = [];
+            $overrideFields = [
+                'atr_min_pips' => $market->atr_min_pips_override,
+                'adx_min' => $market->adx_min_override,
+                'z_abs_max' => $market->z_abs_max_override,
+            ];
+
+            foreach ($overrideFields as $gateKey => $value) {
+                if ($value !== null) {
+                    $gateOverrides[$gateKey] = (float) $value;
+                }
+            }
+
+            if (! empty($gateOverrides)) {
+                $marketMeta['gate_overrides'] = $gateOverrides;
+            }
+        }
+
         $sentiment = $this->fetchSentimentData($pair, $cachedMarketId, $market, $opts);
 
         if ($sentiment !== null) {
@@ -539,14 +480,6 @@ class ContextBuilder
         if ($featureSet === null) {
             return null;
         }
-
-        $dateInfo = $this->resolveNewsDate($newsDateOrDays, $ts);
-        $dateParam = $dateInfo['dateParam'];
-        $statDate = $dateInfo['statDate'];
-
-        $newsSummary = $this->getNewsData($pair, $statDate);
-
-        // record what date param was and what provider returned (helps tests be deterministic)
 
         $calendarInfo = $this->processCalendarData($pair, $ts);
         $cal = $calendarInfo['cal'];
@@ -591,28 +524,25 @@ class ContextBuilder
         $sleeveBalance = $accountInfo['sleeveBalance'];
 
         // Create DecisionContext and pass meta via constructor (non-breaking addition)
-        $ctx = new DecisionContext($pair, $ts, $featureSet, [
-            'schema_version' => '1.0.0',
-            'pair_norm' => strtoupper(str_replace('/', '-', $pair)),
-            'data_age_sec' => $dataAgeSec,
-            'bars_5m' => $bars5meta,
-            'bars_30m' => $bars30meta,
-            'calendar_blackout_window_min' => $blkMin,
-            'sleeve_balance' => $sleeveBalance,
-            'account_name' => $account?->name,
-            'account_id' => $account?->id,
-        ]);
+        $ctx = new DecisionContext(
+            $pair,
+            $ts,
+            $featureSet,
+            new DecisionMetadata([
+                'schema_version' => '1.0.0',
+                'pair_norm' => strtoupper(str_replace('/', '-', $pair)),
+                'data_age_sec' => $dataAgeSec,
+                'bars_5m' => $bars5meta,
+                'bars_30m' => $bars30meta,
+                'calendar_blackout_window_min' => $blkMin,
+                'sleeve_balance' => $sleeveBalance,
+                'account_name' => $account?->name,
+                'account_id' => $account?->id,
+            ])
+        );
 
-        // Build payload by merging ctx->toArray() with news/calendar/blackout
+        // Build payload by merging ctx->toArray() with calendar/blackout metadata
         $payload = $ctx->toArray();
-        // Keep news direction/strength/counts as before but also include raw fields
-        $payload['news'] = [
-            'direction' => $newsSummary['direction'] ?? 'neutral',
-            'strength' => $newsSummary['strength'] ?? 0.0,
-            'counts' => $newsSummary['counts'] ?? ['pos' => 0, 'neg' => 0, 'neu' => 0],
-            'raw_score' => $newsSummary['raw_score'] ?? null,
-            'date' => $newsSummary['date'] ?? null,
-        ];
         $payload['calendar'] = $cal;
         $payload['blackout'] = $blackout;
         // Expose freshness thresholds used to compute stale/fresh logic

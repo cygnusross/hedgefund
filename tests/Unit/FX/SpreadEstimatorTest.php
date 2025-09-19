@@ -17,7 +17,7 @@ it('computes spread pips for EUR/USD and caches result', function () {
         'tradingStatus' => 'TRADEABLE',
     ]]);
 
-    $logger = Mockery::mock(Psr\Log\LoggerInterface::class);
+    $logger = Mockery::mock(Psr\Log\LoggerInterface::class)->shouldIgnoreMissing();
     $est = new SpreadEstimator($mockIg, new CacheRepository(new ArrayStore), $logger, $marketFinder);
 
     $res = $est->estimatePipsForPair('EUR/USD');
@@ -38,10 +38,27 @@ it('computes spread pips for USD/JPY and caches result', function () {
         'tradingStatus' => 'TRADEABLE',
     ]]);
 
-    $logger = Mockery::mock(Psr\Log\LoggerInterface::class);
+    $logger = Mockery::mock(Psr\Log\LoggerInterface::class)->shouldIgnoreMissing();
     $est = new SpreadEstimator($mockIg, new CacheRepository(new ArrayStore), $logger, $marketFinder);
 
     $res = $est->estimatePipsForPair('USD/JPY');
+
+    expect($res)->toBe(0.8);
+});
+
+it('corrects scaled mini contract prices without delimiters', function () {
+    $marketFinder = fn (string $p) => (object) ['epic' => 'CS.D.EURUSD.MINI.IP'];
+
+    $mockIg = Mockery::mock(IgClient::class);
+    $mockIg->shouldReceive('get')->once()->andReturn(['body' => [
+        'snapshot' => ['bid' => '117200', 'offer' => '117208'],
+        'tradingStatus' => 'TRADEABLE',
+    ]]);
+
+    $logger = Mockery::mock(Psr\Log\LoggerInterface::class)->shouldIgnoreMissing();
+    $est = new SpreadEstimator($mockIg, new CacheRepository(new ArrayStore), $logger, $marketFinder);
+
+    $res = $est->estimatePipsForPair('EURUSD');
 
     expect($res)->toBe(0.8);
 });

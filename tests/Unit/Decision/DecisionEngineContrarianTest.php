@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Rules\AlphaRules;
 
 it('holds when contrarian sentiment is against proposed action', function () {
@@ -52,8 +53,8 @@ YAML;
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide($ctx, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $res = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
 
     expect($res['action'])->toBe('hold');
     expect(is_array($res['reasons']))->toBeTrue();

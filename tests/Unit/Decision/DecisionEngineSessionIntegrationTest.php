@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Rules\AlphaRules;
 
 // Override the current time for testing
@@ -63,8 +64,8 @@ YAML;
     // For now, let's test the core logic through reflection and also verify that
     // the session check is positioned correctly in the decision flow.
 
-    $engine = new DecisionEngine;
-    $result = $engine->decide($ctx, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $result = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
 
     // The exact result depends on current time, but we can verify:
     // 1. The method completes without error
@@ -125,8 +126,8 @@ YAML;
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $result = $engine->decide($ctx, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $result = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
 
     // Verify the decision structure is correct
     expect($result)->toBeArray();

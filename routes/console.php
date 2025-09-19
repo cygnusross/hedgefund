@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Support\Facades\Artisan;
+
 if (isset($schedule)) {
     // Economic calendar refresh - weekdays every 20 minutes between 07:00 and 22:00 London time
     $schedule->command('economic:refresh-calendar --force')
@@ -19,24 +21,17 @@ if (isset($schedule)) {
         ->dailyAt('12:00')
         ->timezone('Europe/London');
 
-    // Candle refresh schedule
-    $schedule->command('candles:refresh EURUSD --interval=5min')
+    // Candle refresh schedule - All active markets
+    $schedule->command('candles:refresh --interval=5min')
         ->weekdays()
         ->between('07:00', '22:00')
         ->everyFiveMinutes()
         ->timezone('Europe/London');
 
-    $schedule->command('candles:refresh EURUSD --interval=30min')
+    $schedule->command('candles:refresh --interval=30min')
         ->weekdays()
         ->between('07:00', '22:00')
         ->everyThirtyMinutes()
-        ->timezone('Europe/London');
-
-    // Daily news ingestion at 06:00
-    $schedule->command('news:ingest')
-        ->weekdaysAt('06:00')
-        ->withoutOverlapping()
-        ->onOneServer()
         ->timezone('Europe/London');
 
     // Batch decision analysis - runs every hour at 15 minutes past
@@ -55,3 +50,13 @@ if (isset($schedule)) {
         ->between('07:00', '22:00')
         ->timezone('Europe/London');
 }
+
+Artisan::command('backtest:run {--pair=*} {--start=} {--end=}', function () {
+    $options = array_filter([
+        '--pair' => $this->option('pair'),
+        '--start' => $this->option('start'),
+        '--end' => $this->option('end'),
+    ], fn ($value) => $value !== null && $value !== []);
+
+    $this->call(\App\Console\Commands\BacktestRun::class, $options);
+})->purpose('Run decision engine backtest using stored market data.');

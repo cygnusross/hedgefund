@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Domain\Execution;
 
 use App\Domain\FX\PipMath;
+use App\Support\Math\Decimal;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
 use App\Models\Market;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -20,17 +23,12 @@ class DecisionToIgOrderConverter
 
         $market = self::getMarketForPair($pair);
         $action = strtoupper($decision['action']);
-        $entry = (float) $decision['entry'];
-        $sl = (float) $decision['sl'];
-        $tp = (float) $decision['tp'];
         $size = (float) $decision['size'];
 
         // Get current market data to ensure proper distance from market
         $marketsEndpoint = app(\App\Services\IG\Endpoints\MarketsEndpoint::class);
         $marketDetails = $marketsEndpoint->get($market->epic);
         $snapshot = $marketDetails['snapshot'];
-        $currentBid = ($snapshot['bid'] ?? 0) / 10000;
-        $currentOffer = ($snapshot['offer'] ?? 0) / 10000;
 
         // Get dealing rules for this specific market
         $dealingRules = $marketDetails['dealingRules'];
@@ -41,6 +39,14 @@ class DecisionToIgOrderConverter
         // For CFD (IX.D., etc.): 1 point = 0.00001
         $isSpreadBetting = str_starts_with($market->epic, 'CS.D.');
         $pointScale = $isSpreadBetting ? 10000 : 100000; // SB: /10000, CFD: /100000
+        $pointScaleDecimal = Decimal::of($pointScale);
+
+        $currentBidRaw = (int) ($snapshot['bid'] ?? 0);
+        $currentOfferRaw = (int) ($snapshot['offer'] ?? 0);
+        $currentBidDecimal = Decimal::of($currentBidRaw)->dividedBy($pointScaleDecimal, 12, RoundingMode::HALF_UP);
+        $currentOfferDecimal = Decimal::of($currentOfferRaw)->dividedBy($pointScaleDecimal, 12, RoundingMode::HALF_UP);
+        $currentBid = Decimal::toFloat($currentBidDecimal, 12);
+        $currentOffer = Decimal::toFloat($currentOfferDecimal, 12);
 
         // Determine the effective minimum by checking all possible minimums
         // Don't trust just one field - use the highest applicable one
@@ -62,39 +68,53 @@ class DecisionToIgOrderConverter
         $marketMovementBuffer = 10; // Extra points to handle market movement
         $safeEntryDistance = $minStepDistance + $marketMovementBuffer;
 
+        $safeMinDistanceDecimal = Decimal::of($safeMinDistance);
+        $safeEntryDistanceDecimal = Decimal::of($safeEntryDistance);
+        $entryOffset = $safeEntryDistanceDecimal->dividedBy($pointScaleDecimal, 12, RoundingMode::HALF_UP);
+        $minDistanceOffset = $safeMinDistanceDecimal->dividedBy($pointScaleDecimal, 12, RoundingMode::HALF_UP);
+
         // Calculate entry level using correct point scale
         if ($action === 'BUY') {
             // BUY STOP must be above current offer by at least minStepDistance + buffer
-            $realisticEntry = $currentOffer + ($safeEntryDistance / $pointScale);
+            $realisticEntryDecimal = $currentOfferDecimal->plus($entryOffset);
             $orderType = 'STOP';
             // For BUY orders: stop below entry, limit above entry
-            $stopLevel = $realisticEntry - ($safeMinDistance / $pointScale);
-            $limitLevel = $realisticEntry + ($safeMinDistance / $pointScale);
+            $stopLevelDecimal = $realisticEntryDecimal->minus($minDistanceOffset);
+            $limitLevelDecimal = $realisticEntryDecimal->plus($minDistanceOffset);
         } else {
             // SELL STOP must be below current bid by at least minStepDistance + buffer
-            $realisticEntry = $currentBid - ($safeEntryDistance / $pointScale);
+            $realisticEntryDecimal = $currentBidDecimal->minus($entryOffset);
             $orderType = 'STOP';
             // For SELL orders: stop above entry, limit below entry
-            $stopLevel = $realisticEntry + ($safeMinDistance / $pointScale);
-            $limitLevel = $realisticEntry - ($safeMinDistance / $pointScale);
+            $stopLevelDecimal = $realisticEntryDecimal->plus($minDistanceOffset);
+            $limitLevelDecimal = $realisticEntryDecimal->minus($minDistanceOffset);
         }
 
         // Snap all levels to proper ticks (0.0001 for EUR/USD, 0.01 for JPY pairs)
-        $tickSize = str_contains($pair, 'JPY') ? 0.01 : 0.0001;
-        $realisticEntry = self::snapToTick($realisticEntry, $tickSize);
-        $stopLevel = self::snapToTick($stopLevel, $tickSize);
-        $limitLevel = self::snapToTick($limitLevel, $tickSize);
+        $tickSize = PipMath::tickSize($pair);
+        $tickSizeDecimal = Decimal::of($tickSize);
+        $realisticEntryDecimal = self::snapToTick($realisticEntryDecimal, $tickSizeDecimal);
+        $stopLevelDecimal = self::snapToTick($stopLevelDecimal, $tickSizeDecimal);
+        $limitLevelDecimal = self::snapToTick($limitLevelDecimal, $tickSizeDecimal);
+
+        $realisticEntry = Decimal::toFloat($realisticEntryDecimal, 12);
+        $stopLevel = Decimal::toFloat($stopLevelDecimal, 12);
+        $limitLevel = Decimal::toFloat($limitLevelDecimal, 12);
 
         // Convert back to raw format for IG API (multiply by pointScale)
-        $rawEntry = round($realisticEntry * $pointScale);
-        $rawStopLevel = round($stopLevel * $pointScale);
-        $rawLimitLevel = round($limitLevel * $pointScale);
+        $rawEntry = $realisticEntryDecimal->multipliedBy($pointScaleDecimal)->toScale(0, RoundingMode::HALF_UP)->toInt();
+        $rawStopLevel = $stopLevelDecimal->multipliedBy($pointScaleDecimal)->toScale(0, RoundingMode::HALF_UP)->toInt();
+        $rawLimitLevel = $limitLevelDecimal->multipliedBy($pointScaleDecimal)->toScale(0, RoundingMode::HALF_UP)->toInt();
 
         // Final validation: ensure distances from current market are adequate
-        $currentPrice = $action === 'BUY' ? $currentOffer : $currentBid;
-        $entryDistanceFromMarket = abs($realisticEntry - $currentPrice) * $pointScale;
-        $stopDistanceFromEntry = abs($stopLevel - $realisticEntry) * $pointScale;
-        $limitDistanceFromEntry = abs($limitLevel - $realisticEntry) * $pointScale;
+        $currentPriceDecimal = $action === 'BUY' ? $currentOfferDecimal : $currentBidDecimal;
+        $entryDistanceFromMarketDecimal = $realisticEntryDecimal->minus($currentPriceDecimal)->abs()->multipliedBy($pointScaleDecimal);
+        $stopDistanceFromEntryDecimal = $stopLevelDecimal->minus($realisticEntryDecimal)->abs()->multipliedBy($pointScaleDecimal);
+        $limitDistanceFromEntryDecimal = $limitLevelDecimal->minus($realisticEntryDecimal)->abs()->multipliedBy($pointScaleDecimal);
+
+        $entryDistanceFromMarket = Decimal::toFloat($entryDistanceFromMarketDecimal, 4);
+        $stopDistanceFromEntry = Decimal::toFloat($stopDistanceFromEntryDecimal, 4);
+        $limitDistanceFromEntry = Decimal::toFloat($limitDistanceFromEntryDecimal, 4);
 
         // Log all the minimums and effective values for debugging
         Log::info('IG Order Parameters', [
@@ -120,7 +140,12 @@ class DecisionToIgOrderConverter
             'limit_distance_from_entry' => $limitDistanceFromEntry,
         ]);
 
-        $adjustedSize = max($size, 0.04);
+        $sizeDecimal = Decimal::of($size);
+        $minSizeDecimal = Decimal::of(0.04);
+        if ($sizeDecimal->isLessThan($minSizeDecimal)) {
+            $sizeDecimal = $minSizeDecimal;
+        }
+        $adjustedSize = Decimal::toFloat($sizeDecimal, 6);
 
         return [
             'currencyCode' => 'GBP',
@@ -139,18 +164,28 @@ class DecisionToIgOrderConverter
 
     protected static function calculateDistance(float $from, float $to, string $pair): float
     {
-        $priceDelta = abs($from - $to);
-        $pipsDistance = PipMath::toPips($priceDelta, $pair);
+        $fromDecimal = Decimal::of($from);
+        $toDecimal = Decimal::of($to);
+        $priceDelta = $fromDecimal->minus($toDecimal)->abs();
+        $pipSizeDecimal = Decimal::of(PipMath::pipSize($pair));
 
-        return round($pipsDistance);
+        if ($pipSizeDecimal->isZero()) {
+            return 0.0;
+        }
+
+        $pipsDistance = $priceDelta->dividedBy($pipSizeDecimal, 12, RoundingMode::HALF_UP);
+
+        return Decimal::toFloat($pipsDistance->toScale(0, RoundingMode::HALF_UP), 0);
     }
 
     /**
      * Snap price to the nearest valid tick size
      */
-    protected static function snapToTick(float $price, float $tickSize): float
+    protected static function snapToTick(BigDecimal $price, BigDecimal $tickSize): BigDecimal
     {
-        return round($price / $tickSize) * $tickSize;
+        $steps = $price->dividedBy($tickSize, 12, RoundingMode::HALF_UP)->toScale(0, RoundingMode::HALF_UP);
+
+        return $steps->multipliedBy($tickSize);
     }
 
     protected static function getMarketForPair(string $pair): Market

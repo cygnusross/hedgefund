@@ -1,6 +1,7 @@
 <?php
 
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Execution\PositionLedgerContract;
 use App\Domain\Rules\AlphaRules;
 
@@ -47,8 +48,6 @@ YAML;
         }
     };
 
-    app()->instance(PositionLedgerContract::class, $fake);
-
     $ctx = [
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 10],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5],
@@ -57,16 +56,12 @@ YAML;
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide($ctx, $rules);
+    $engine = new LiveDecisionEngine($rules, null, $fake);
+    $res = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
 
     expect($res['action'])->toBe('hold');
     expect($res['reasons'])->toContain('max_concurrent');
 
-    // Restore default ledger binding
-    app()->bind(\App\Domain\Execution\PositionLedgerContract::class, function () {
-        return new \App\Domain\Execution\NullPositionLedger;
-    });
 });
 
 it('holds when pair exposure >= pair_exposure_pct cap', function () {
@@ -112,8 +107,6 @@ YAML;
         }
     };
 
-    app()->instance(PositionLedgerContract::class, $fake);
-
     $ctx = [
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 10],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5],
@@ -122,14 +115,8 @@ YAML;
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide($ctx, $rules);
-
+    $engine = new LiveDecisionEngine($rules, null, $fake);
+    $res = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
     expect($res['action'])->toBe('hold');
     expect($res['reasons'])->toContain('pair_exposure_cap');
-
-    // Restore default ledger binding
-    app()->bind(\App\Domain\Execution\PositionLedgerContract::class, function () {
-        return new \App\Domain\Execution\NullPositionLedger;
-    });
 });

@@ -1,7 +1,9 @@
 <?php
 
 use App\Domain\Decision\DecisionContext;
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionMetadata;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Market\FeatureSet;
 use App\Domain\Rules\AlphaRules;
 
@@ -23,13 +25,13 @@ it('returns hold by default', function () {
     );
     // Use a recent timestamp
     $ts = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-    $ctx = new DecisionContext('EUR/USD', $ts, $features, []);
+    $ctx = new DecisionContext('EUR/USD', $ts, $features, new DecisionMetadata);
 
     // AlphaRules requires a path; provide a dummy file and avoid reload
     $rules = new AlphaRules(__DIR__.'/fixtures/empty_rules.yaml');
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide($ctx, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $res = $engine->decide(DecisionRequest::fromContext($ctx))->toArray();
 
     expect($res)->toBeArray();
     expect($res['action'])->toBe('hold');

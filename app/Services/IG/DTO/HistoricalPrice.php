@@ -36,7 +36,7 @@ readonly class HistoricalPrice
         // Parse the snapshot time (format: yyyy/MM/dd hh:mm:ss)
         $timestamp = \DateTimeImmutable::createFromFormat('Y/m/d H:i:s', $this->snapshotTime, new \DateTimeZone('UTC'));
 
-        if (!$timestamp) {
+        if (! $timestamp) {
             throw new \InvalidArgumentException("Invalid snapshot time format: {$this->snapshotTime}");
         }
 

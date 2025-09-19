@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use App\Domain\FX\SpreadEstimator;
+use App\Domain\FX\Contracts\SpreadEstimatorContract;
 use App\Models\Market;
 use App\Models\Spread;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -38,10 +38,10 @@ beforeEach(function () {
     ]);
 
     // Create a complete mock to prevent ANY real API calls
-    $mockSpreadEstimator = \Mockery::mock(SpreadEstimator::class);
+    $mockSpreadEstimator = \Mockery::mock(SpreadEstimatorContract::class);
 
     // Bind the mock in the container to replace the real service completely
-    $this->app->instance(SpreadEstimator::class, $mockSpreadEstimator);
+    $this->app->instance(SpreadEstimatorContract::class, $mockSpreadEstimator);
 
     // Store reference so individual tests can add expectations
     $this->mockSpreadEstimator = $mockSpreadEstimator;

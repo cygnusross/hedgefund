@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Rules\AlphaRules;
 
 it('enforces ig minNormalStopOrLimitDistance by pushing sl/tp outward', function () {
@@ -49,12 +50,13 @@ it('enforces ig minNormalStopOrLimitDistance by pushing sl/tp outward', function
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide($ctx, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $res = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
 
     expect($res['action'])->toBe('buy');
     // entry - sl should be at least 0.0020
     $delta = $res['entry'] - $res['sl'];
     expect($delta)->toBeGreaterThanOrEqual(0.0019); // allow tiny rounding
     expect($delta)->toBeLessThanOrEqual(0.0021);
+    expect($res['reasons'])->toContain('levels_adjusted_for_ig_rules');
 });

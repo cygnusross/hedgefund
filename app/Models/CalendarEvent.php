@@ -7,6 +7,8 @@ use Illuminate\Support\Str;
 
 class CalendarEvent extends Model
 {
+    use \Illuminate\Database\Eloquent\Factories\HasFactory;
+
     protected $fillable = [
         'title',
         'currency',

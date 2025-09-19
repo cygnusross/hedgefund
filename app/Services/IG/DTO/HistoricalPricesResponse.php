@@ -35,6 +35,6 @@ readonly class HistoricalPricesResponse
      */
     public function toBars(): array
     {
-        return array_map(fn(HistoricalPrice $price) => $price->toBar(), $this->prices);
+        return array_map(fn (HistoricalPrice $price) => $price->toBar(), $this->prices);
     }
 }

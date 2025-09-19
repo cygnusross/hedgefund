@@ -2,11 +2,12 @@
 
 namespace App\Services\IG;
 
+use App\Domain\Sentiment\Contracts\SentimentProvider;
 use App\Services\IG\Endpoints\ClientSentimentEndpoint;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\Log;
 
-class ClientSentimentProvider
+class ClientSentimentProvider implements SentimentProvider
 {
     public function __construct(protected ClientSentimentEndpoint $endpoint, protected CacheRepository $cache) {}
 

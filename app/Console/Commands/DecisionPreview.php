@@ -3,35 +3,29 @@
 namespace App\Console\Commands;
 
 use App\Application\ContextBuilder;
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\Contracts\LiveDecisionEngineContract;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Execution\DecisionToIgOrderConverter;
 use Illuminate\Console\Command;
 
 class DecisionPreview extends Command
 {
-    protected $signature = 'decision:preview {pair} {--force-calendar} {--force-sentiment} {--strict} {--account= : Account name to use for position sizing} {--refresh-news : Ingest fresh news before building context}';
+    protected $signature = 'decision:preview {pair} {--force-calendar} {--force-sentiment} {--strict} {--account= : Account name to use for position sizing}';
 
-    protected $description = 'Preview DecisionEngine output for a given pair';
+    protected $description = 'Preview LiveDecisionEngine output for a given pair';
 
     public function handle(): int
     {
         $pair = $this->argument('pair');
         $forceCalendar = $this->option('force-calendar');
         $forceSentiment = $this->option('force-sentiment');
-        $refreshNews = $this->option('refresh-news');
         $accountName = $this->option('account');
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
 
-        // Ingest fresh news before building context if requested
-        if ($refreshNews) {
-            $this->line('Refreshing news data...');
-            $this->call('news:ingest', ['--today' => true]);
-        }
-
         // Resolve dependencies via the container so tests may bind substitutes
         $builder = app(ContextBuilder::class);
-        $engine = app(DecisionEngine::class);
+        $engine = app(LiveDecisionEngineContract::class);
 
         // Build context; pass force options via $opts
         $opts = [
@@ -46,7 +40,8 @@ class DecisionPreview extends Command
             return 1;
         }
 
-        $decision = $engine->decide($ctx, app(\App\Domain\Rules\AlphaRules::class));
+        $decisionDto = $engine->decide(DecisionRequest::fromArray($ctx));
+        $decision = $decisionDto->toArray();
 
         // Generate IG order data if decision is not hold
         $igOrder = null;
@@ -72,7 +67,6 @@ class DecisionPreview extends Command
             'decision' => $decision,
             'ig_order' => $igOrder,
             'market' => $ctx['market'] ?? null,
-            'news' => $ctx['news'] ?? null,
             'features' => $ctx['features'] ?? null,
             'meta' => $ctx['meta'] ?? null, // Add meta section for debugging
         ];
@@ -80,9 +74,10 @@ class DecisionPreview extends Command
         $json = json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         $this->line($json);
 
-        $blocked = (bool) ($decision['blocked'] ?? ($decision['action'] === 'hold'));
+        $action = $decision['action'] ?? 'hold';
+        $blocked = (bool) ($decision['blocked'] ?? false);
 
-        if ($this->option('strict') && $blocked) {
+        if ($this->option('strict') && ($blocked || $action === 'hold')) {
             return 2;
         }
 

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Candle;
+use App\Models\Market;
 use App\Services\Prices\PriceProvider;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -11,9 +12,11 @@ use Illuminate\Support\Facades\Log;
 
 class CandlesSeedHistory extends Command
 {
-    protected $signature = 'candles:seed-history {pair} {--no-rate-limit : Skip rate limiting (for testing)}';
+    protected $signature = 'candles:seed-history {pair?} {--no-rate-limit : Skip rate limiting (for testing)}';
 
-    protected $description = 'Seed 3 years of historical candle data (5min and 30min intervals) for a trading pair';
+    protected $description = 'Seed 3 years of historical candle data (5min and 30min intervals) for a trading pair or all active markets';
+
+    private bool $hadFailure = false;
 
     public function __construct(
         protected PriceProvider $priceProvider
@@ -23,7 +26,63 @@ class CandlesSeedHistory extends Command
 
     public function handle(): int
     {
+        $this->hadFailure = false;
         $pair = $this->argument('pair');
+
+        // If no pair specified, get all active markets
+        if (! $pair) {
+            $markets = Market::where('is_active', true)->pluck('symbol')->toArray();
+
+            if (empty($markets)) {
+                $this->error('No active markets found in the database.');
+
+                return self::FAILURE;
+            }
+
+            $this->info('No pair specified. Processing all active markets: '.implode(', ', $markets));
+
+            $totalInsertedAllMarkets = 0;
+
+            foreach ($markets as $marketSymbol) {
+                $this->info("🔄 Processing market: {$marketSymbol}");
+
+                $totalInserted = $this->processMarket($marketSymbol);
+                if ($totalInserted === null) {
+                    $this->warn("⚠️ Failed to seed {$marketSymbol}. See logs for details.");
+                    $this->newLine();
+
+                    continue;
+                }
+
+                $totalInsertedAllMarkets += $totalInserted;
+
+                $this->info("✅ Completed {$marketSymbol}. Inserted: {$totalInserted} candles");
+                $this->newLine();
+            }
+
+            $this->info("🎉 Completed all markets. Total new candles inserted: {$totalInsertedAllMarkets}");
+
+            return $this->hadFailure ? self::FAILURE : self::SUCCESS;
+        }
+
+        // Process single market
+        $totalInserted = $this->processMarket($pair);
+        if ($totalInserted === null) {
+            return self::FAILURE;
+        }
+
+        $this->info("✅ Completed seeding for {$pair}. Total new candles inserted: {$totalInserted}");
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Process a single market for historical data seeding.
+     *
+     * @return int|null Total candles inserted, or null when the provider fails.
+     */
+    protected function processMarket(string $pair): ?int
+    {
         $intervals = ['5min', '30min'];
 
         $this->info("Seeding 3 years of historical candle data for {$pair} (5min and 30min intervals)...");
@@ -55,9 +114,7 @@ class CandlesSeedHistory extends Command
                 $this->logSeedingResults($pair, $interval, $totalInserted, $existingCount);
             }
 
-            $this->info("✅ Completed seeding for {$pair}. Total new candles inserted: {$totalInsertedAll}");
-
-            return self::SUCCESS;
+            return $totalInsertedAll;
         } catch (\Exception $e) {
             $this->error('Failed to seed candles: '.$e->getMessage());
 
@@ -67,7 +124,9 @@ class CandlesSeedHistory extends Command
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return self::FAILURE;
+            $this->hadFailure = true;
+
+            return null;
         }
     }
 
@@ -90,16 +149,16 @@ class CandlesSeedHistory extends Command
         $totalInserted = 0;
         $chunks = $this->calculateDateChunks($interval, $startTime, $endTime);
 
-        $this->info('Processing '.count($chunks).' date chunks with rate limiting (8 calls/min)...');
+        $this->info('Processing '.count($chunks).' date chunks with rate limiting (25-30 calls/min)...');
 
         $progressBar = $this->output->createProgressBar(count($chunks));
         $progressBar->start();
 
         foreach ($chunks as $chunkIndex => $chunk) {
-            // Rate limiting: 8 calls per minute = 7.5 second delays
+            // Rate limiting: 25-30 calls per minute = 2-2.5 second delays
             if ($chunkIndex > 0 && ! $this->option('no-rate-limit')) {
-                $this->comment(' [Rate limiting: waiting 8 seconds...]');
-                sleep(8);
+                $this->comment(' [Rate limiting: waiting 2.5 seconds...]');
+                usleep(2500000); // 2.5 seconds in microseconds
             }
 
             try {
@@ -109,6 +168,9 @@ class CandlesSeedHistory extends Command
                     $inserted = $this->bulkInsertCandles($pair, $interval, $candles);
                     $totalInserted += $inserted;
                 }
+
+                // Free memory after processing each chunk
+                unset($candles);
             } catch (\Exception $e) {
                 $this->error('Chunk failed: '.$e->getMessage());
                 Log::warning('Candle seeding chunk failed', [
@@ -124,6 +186,9 @@ class CandlesSeedHistory extends Command
 
         $progressBar->finish();
         $this->newLine();
+
+        // Force garbage collection after processing all chunks
+        gc_collect_cycles();
 
         return $totalInserted;
     }
@@ -178,60 +243,74 @@ class CandlesSeedHistory extends Command
     }
 
     /**
-     * Bulk insert candles with upsert for idempotency
+     * Bulk insert candles with memory-efficient chunked processing
      */
     protected function bulkInsertCandles(string $pair, string $interval, array $bars): int
     {
-        $candleData = [];
+        if (empty($bars)) {
+            return 0;
+        }
+
         $now = now();
         $filteredCount = 0;
+        $totalInserted = 0;
+        $beforeCount = Candle::forPair($pair)->forInterval($interval)->count();
 
-        foreach ($bars as $bar) {
-            $timestamp = Carbon::parse($bar->ts);
-            $hour = $timestamp->hour;
+        // Process bars in memory-efficient chunks of 1000
+        foreach (array_chunk($bars, 1000) as $chunk) {
+            $candleData = [];
 
-            // Only include candles within London market hours (07:00-22:00 UTC)
-            if ($hour < 7 || $hour > 22) {
-                $filteredCount++;
+            foreach ($chunk as $bar) {
+                $timestamp = Carbon::parse($bar->ts);
+                $hour = $timestamp->hour;
 
-                continue;
+                // Only include candles within London market hours (07:00-22:00 UTC)
+                if ($hour < 7 || $hour > 22) {
+                    $filteredCount++;
+
+                    continue;
+                }
+
+                $candleData[] = [
+                    'pair' => $pair,
+                    'interval' => $interval,
+                    'timestamp' => $bar->ts,
+                    'open' => $bar->open,
+                    'high' => $bar->high,
+                    'low' => $bar->low,
+                    'close' => $bar->close,
+                    'volume' => $bar->volume,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
             }
 
-            $candleData[] = [
-                'pair' => $pair,
-                'interval' => $interval,
-                'timestamp' => $bar->ts,
-                'open' => $bar->open,
-                'high' => $bar->high,
-                'low' => $bar->low,
-                'close' => $bar->close,
-                'volume' => $bar->volume,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
+            // Insert this chunk if not empty
+            if (! empty($candleData)) {
+                DB::table('candles')->upsert(
+                    $candleData,
+                    ['pair', 'interval', 'timestamp'], // Unique key columns
+                    ['open', 'high', 'low', 'close', 'volume', 'updated_at'] // Columns to update
+                );
+
+                // Force immediate garbage collection after each database insert
+                gc_collect_cycles();
+            }
+
+            // Free memory for this chunk
+            unset($candleData, $chunk);
         }
+
+        // Force garbage collection to free memory
+        gc_collect_cycles();
 
         if ($filteredCount > 0) {
             Log::info('Filtered out candles outside market hours', [
                 'pair' => $pair,
                 'interval' => $interval,
                 'filtered_count' => $filteredCount,
-                'kept_count' => count($candleData),
             ]);
         }
-
-        if (empty($candleData)) {
-            return 0;
-        }
-
-        // Use upsert for idempotency
-        $beforeCount = Candle::forPair($pair)->forInterval($interval)->count();
-
-        DB::table('candles')->upsert(
-            $candleData,
-            ['pair', 'interval', 'timestamp'], // Unique key columns
-            ['open', 'high', 'low', 'close', 'volume', 'updated_at'] // Columns to update
-        );
 
         $afterCount = Candle::forPair($pair)->forInterval($interval)->count();
 

@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Rules\AlphaRules;
 
 it('holds when spread exceeds configured ceiling', function () {
@@ -46,10 +47,11 @@ it('holds when spread exceeds configured ceiling', function () {
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide($ctx, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $res = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
 
     expect($res['action'])->toBe('hold');
+    expect($res['blocked'])->toBeTrue();
     expect(is_array($res['reasons']))->toBeTrue();
     expect($res['reasons'])->toContain('spread_too_wide');
 });
@@ -96,8 +98,8 @@ it('computes sl/tp deltas correctly for JPY vs non-JPY pairs', function () {
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $res1 = $engine->decide($ctx1, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $res1 = $engine->decide(DecisionRequest::fromArray($ctx1))->toArray();
 
     // ATR=10 pips, sl_mult=2 => slPips=20 => delta = 20 * 0.0001 = 0.0020
     expect($res1['action'])->toBe('buy');
@@ -121,7 +123,7 @@ it('computes sl/tp deltas correctly for JPY vs non-JPY pairs', function () {
     $ctx2['meta']['pair_norm'] = 'USDJPY';
     $ctx2['market']['last_price'] = 155.25;
 
-    $res2 = $engine->decide($ctx2, $rules);
+    $res2 = $engine->decide(DecisionRequest::fromArray($ctx2))->toArray();
 
     // ATR=10 pips, sl_mult=2 => slPips=20 => delta = 20 * 0.01 = 0.20
     expect($res2['action'])->toBe('buy');

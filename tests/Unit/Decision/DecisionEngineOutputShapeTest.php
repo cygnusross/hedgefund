@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Rules\AlphaRules;
 
 it('when allowed includes news_label and trade fields; when blocked sets blocked=true', function () {
@@ -38,21 +39,8 @@ YAML;
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $resAllowed = $engine->decide(new class($ctxAllowed)
-    {
-        private $p;
-
-        public function __construct($p)
-        {
-            $this->p = $p;
-        }
-
-        public function toArray()
-        {
-            return $this->p;
-        }
-    }, $rules);
+    $engine = new LiveDecisionEngine($rules);
+    $resAllowed = $engine->decide(DecisionRequest::fromArray($ctxAllowed))->toArray();
 
     // When allowed, expect action != 'hold' and presence of news_label and trade fields
     expect($resAllowed['action'])->not->toBe('hold');
@@ -72,20 +60,8 @@ YAML;
     $ctxBlocked = $ctxAllowed;
     $ctxBlocked['features']['adx5m'] = 5;
 
-    $resBlocked = $engine->decide(new class($ctxBlocked)
-    {
-        private $p;
-
-        public function __construct($p)
-        {
-            $this->p = $p;
-        }
-
-        public function toArray()
-        {
-            return $this->p;
-        }
-    }, $rulesBlock);
+    $engineBlocked = new LiveDecisionEngine($rulesBlock);
+    $resBlocked = $engineBlocked->decide(DecisionRequest::fromArray($ctxBlocked))->toArray();
 
     expect($resBlocked['action'])->toBe('hold');
     expect(is_array($resBlocked['reasons']))->toBeTrue();

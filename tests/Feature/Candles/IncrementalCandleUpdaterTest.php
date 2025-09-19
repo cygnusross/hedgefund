@@ -130,6 +130,19 @@ it('incremental_merge_with_overlap', function () {
 
     // Expect t1..t8 (8 bars) with no duplicates
     expect($merged)->toHaveCount(8);
+
+    // Overlap timestamp should keep the fresh provider values
+    $overlapTs = $fresh[0]->ts->format('c');
+    $overlapBar = null;
+    foreach ($merged as $bar) {
+        if ($bar->ts->format('c') === $overlapTs) {
+            $overlapBar = $bar;
+            break;
+        }
+    }
+    expect($overlapBar)->not->toBeNull();
+    expect($overlapBar->open)->toEqual($fresh[0]->open);
+
     // Ensure timestamps strictly increasing
     $prev = null;
     foreach ($merged as $b) {

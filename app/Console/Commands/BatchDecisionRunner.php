@@ -3,7 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Application\ContextBuilder;
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\Contracts\LiveDecisionEngineContract;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Execution\DecisionToIgOrderConverter;
 use App\Models\Market;
 use App\Services\IG\WorkingOrderService;
@@ -20,18 +21,14 @@ class BatchDecisionRunner extends Command
     {
         $this->info('🚀 Starting batch decision analysis...');
 
-        // Step 1: Fresh news ingestion
-        $this->line('📰 Ingesting fresh news data...');
-        $this->call('news:ingest');
-
-        // Step 2: Get active markets
+        // Step 1: Get active markets
         $markets = Market::where('is_active', true)->get();
         $this->info("📊 Analyzing {$markets->count()} markets...");
 
-        // Step 3: Generate decisions for all markets
+        // Step 2: Generate decisions for all markets
         $decisions = $this->analyzeAllMarkets($markets);
 
-        // Step 4: Rank tradeable decisions
+        // Step 3: Rank tradeable decisions
         $tradeableDecisions = $this->rankDecisions($decisions);
 
         if (empty($tradeableDecisions)) {
@@ -40,7 +37,7 @@ class BatchDecisionRunner extends Command
             return 0;
         }
 
-        // Step 5: Execute best trade
+        // Step 4: Execute best trade
         $this->executeBestTrade($tradeableDecisions[0], $workingOrderService);
 
         return 0;
@@ -51,8 +48,7 @@ class BatchDecisionRunner extends Command
         $decisions = [];
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $builder = app(ContextBuilder::class);
-        $engine = app(DecisionEngine::class);
-        $rules = app(\App\Domain\Rules\AlphaRules::class);
+        $engine = app(LiveDecisionEngineContract::class);
 
         foreach ($markets as $market) {
             $this->line("🔍 Analyzing {$market->symbol}...");
@@ -75,7 +71,9 @@ class BatchDecisionRunner extends Command
                     continue;
                 }
 
-                $decision = $engine->decide($ctx, $rules);
+                $request = DecisionRequest::fromArray($ctx);
+                $decisionDto = $engine->decide($request);
+                $decision = $decisionDto->toArray();
             } catch (\Exception $e) {
                 $this->error("❌ Error analyzing {$market->symbol}: {$e->getMessage()}");
                 Log::error("Market analysis failed for {$market->symbol}", [

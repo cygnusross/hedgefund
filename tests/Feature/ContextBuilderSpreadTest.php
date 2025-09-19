@@ -2,7 +2,7 @@
 
 use App\Application\Calendar\CalendarLookup;
 use App\Application\ContextBuilder;
-use App\Domain\FX\SpreadEstimator;
+use App\Domain\FX\Contracts\SpreadEstimatorContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 // Use fully-qualified global DateTime classes to avoid non-compound use statement warnings
@@ -55,7 +55,7 @@ it('includes spread_estimate_pips when SpreadEstimator returns a value', functio
         }
     };
 
-    $mockEstimator = Mockery::mock(SpreadEstimator::class);
+    $mockEstimator = Mockery::mock(SpreadEstimatorContract::class);
     $mockEstimator->shouldReceive('estimatePipsForPair')->andReturn(0.9);
     $mockEstimator->shouldReceive('getMarketStatusForPair')->andReturn('OPEN');
 

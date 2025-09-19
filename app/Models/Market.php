@@ -14,11 +14,19 @@ class Market extends Model
         'symbol',
         'epic',
         'currencies',
+        'price_scale',
+        'atr_min_pips_override',
+        'adx_min_override',
+        'z_abs_max_override',
         'is_active',
     ];
 
     protected $casts = [
         'currencies' => 'array',
         'is_active' => 'boolean',
+        'price_scale' => 'float',
+        'atr_min_pips_override' => 'float',
+        'adx_min_override' => 'float',
+        'z_abs_max_override' => 'float',
     ];
 }

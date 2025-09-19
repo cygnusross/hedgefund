@@ -5,17 +5,16 @@ declare(strict_types=1);
 use App\Application\ContextBuilder;
 use App\Models\Market;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Mockery;
 
 uses(RefreshDatabase::class);
 
 test('batch decision runner analyzes active markets', function () {
     // Mock the ContextBuilder to return null (no tradeable context)
-    $mockContextBuilder = Mockery::mock(\App\Application\ContextBuilder::class);
+    $mockContextBuilder = \Mockery::mock(ContextBuilder::class);
     $mockContextBuilder->shouldReceive('build')
         ->andReturn(null);
 
-    $this->app->instance(\App\Application\ContextBuilder::class, $mockContextBuilder);
+    $this->app->instance(ContextBuilder::class, $mockContextBuilder);
 
     // Create test markets with unique epics to avoid constraint violations
     Market::factory()->create([

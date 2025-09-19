@@ -1,6 +1,7 @@
 <?php
 
-use App\Domain\Decision\DecisionEngine;
+use App\Domain\Decision\LiveDecisionEngine;
+use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Execution\PositionLedgerContract;
 use App\Domain\Rules\AlphaRules;
 
@@ -50,8 +51,6 @@ YAML;
         }
     };
 
-    app()->instance(PositionLedgerContract::class, $fake);
-
     $ctx = [
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 10, 'sleeve_balance' => 10000.0],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5, 'ig_rules' => ['pip_value' => 1.0, 'size_step' => 0.01]],
@@ -60,16 +59,11 @@ YAML;
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide($ctx, $rules);
+    $engine = new LiveDecisionEngine($rules, null, $fake);
+    $res = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
 
     // Risk: 1% of 10000 = 100; slPips = sl_atr_mult * atr = 2 * 10 = 20; pip_value=1 => rawSize=100/(20*1)=5
     expect($res['size'])->toBe(5.0);
-
-    // Restore default ledger binding
-    app()->bind(\App\Domain\Execution\PositionLedgerContract::class, function () {
-        return new \App\Domain\Execution\NullPositionLedger;
-    });
 });
 
 it('demonstrates account balance integration with position sizing', function () {
@@ -145,8 +139,6 @@ YAML;
         }
     };
 
-    app()->instance(PositionLedgerContract::class, $fake);
-
     // For USD/JPY, pip_value may be different — set pip_value to 0.9 to simulate
     $ctx = [
         'meta' => ['pair_norm' => 'USDJPY', 'data_age_sec' => 10, 'sleeve_balance' => 10000.0],
@@ -156,14 +148,9 @@ YAML;
         'calendar' => ['within_blackout' => false],
     ];
 
-    $engine = new DecisionEngine;
-    $res = $engine->decide($ctx, $rules);
+    $engine = new LiveDecisionEngine($rules, null, $fake);
+    $res = $engine->decide(DecisionRequest::fromArray($ctx))->toArray();
 
     // RiskAmount = 100; slPips = 20; pip_value = 0.9 -> rawSize = 100/(20*0.9) = 5.555... -> floor to 5.55 step 0.01
     expect($res['size'])->toBe(5.55);
-
-    // Restore default ledger binding
-    app()->bind(\App\Domain\Execution\PositionLedgerContract::class, function () {
-        return new \App\Domain\Execution\NullPositionLedger;
-    });
 });
