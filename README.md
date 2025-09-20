@@ -1,13 +1,12 @@
 # Hedge Fund Trading System
 
-A Laravel-based algorithmic trading system for foreign exchange (FX) markets. This application provides automated decision-making capabilities for forex trading using technical analysis, news sentiment, and economic calendar data.
+A Laravel-based algorithmic trading system for foreign exchange (FX) markets. This application provides automated decision-making capabilities for forex trading using technical analysis and economic calendar data.
 
 ## 🎯 System Overview
 
 This is a **quantitative trading platform** that:
 
 -   **Analyzes market data** from multiple timeframes (5-minute and 30-minute candles)
--   **Processes news sentiment** to gauge market direction and strength
 -   **Monitors economic calendar** events to avoid trading during high-impact announcements
 -   **Calculates technical indicators** (EMA, ATR, ADX, support/resistance levels)
 -   **Makes trading decisions** based on configurable rule sets
@@ -23,7 +22,6 @@ This is a **quantitative trading platform** that:
 -   **Node.js**: For frontend asset compilation
 -   **External APIs**:
     -   TwelveData (price data)
-    -   ForexNewsAPI (news sentiment)
     -   IG Markets API (spreads and execution)
 
 ## 🏗️ Architecture
@@ -35,8 +33,7 @@ app/
 ├── Application/           # Application services and use cases
 │   ├── Calendar/         # Economic calendar management
 │   ├── Candles/         # Price data synchronization
-│   ├── ContextBuilder   # Aggregates all data for decision making
-│   └── News/            # News aggregation and processing
+│   └── ContextBuilder   # Aggregates all data for decision making
 ├── Domain/              # Core business logic
 │   ├── Decision/        # Trading decision engine
 │   ├── Execution/       # Position management contracts
@@ -50,7 +47,6 @@ app/
 ├── Services/           # External API clients
 │   ├── Economic/       # Economic calendar APIs
 │   ├── IG/            # IG Markets integration
-│   ├── News/          # News provider APIs
 │   └── Prices/        # Price data APIs
 └── Models/            # Eloquent models
 ```
@@ -61,7 +57,7 @@ app/
 
 The heart of the system that evaluates trading opportunities:
 
--   **Input**: Market context (prices, features, news, calendar)
+-   **Input**: Market context (prices, features, calendar)
 -   **Processing**: Applies configurable gates and rules
 -   **Output**: Trading decision (buy/sell/hold) with confidence and reasoning
 
@@ -80,7 +76,6 @@ Aggregates all necessary data for decision making:
 
 -   **Market Data**: Current prices, spreads, trading status
 -   **Technical Features**: EMA, ATR, ADX, trend analysis, support/resistance
--   **News Sentiment**: Strength and directional bias from news analysis
 -   **Economic Calendar**: Upcoming high-impact events and blackout periods
 -   **Position Information**: Current exposure and recent trade outcomes
 
@@ -95,15 +90,7 @@ Calculates technical indicators from price data:
 -   **Support/Resistance**: Key price levels
 -   **Trend Classification**: 30-minute trend direction
 
-#### 4. News Processing
-
-Analyzes market sentiment from news sources:
-
--   **Sentiment Aggregation**: Positive/negative/neutral news counts
--   **Direction Bias**: Buy/sell/neutral market direction
--   **Strength Scoring**: 0-1 scale of news impact
-
-#### 5. Calendar Management
+#### 4. Calendar Management
 
 Economic event monitoring and blackout logic:
 
@@ -119,7 +106,6 @@ Economic event monitoring and blackout logic:
 -   **`markets`**: Trading instruments (EUR/USD, GBP/USD, etc.)
 -   **`orders`**: Trade execution records
 -   **`calendar_events`**: Economic calendar events with impact ratings
--   **`news_stats`**: News sentiment aggregation by currency pair
 
 ### Key Fields
 
@@ -144,10 +130,6 @@ Economic event monitoring and blackout logic:
         'adx5m' => 25.0,
         'trend30m' => 'up'
     ],
-    'news' => [
-        'strength' => 0.35,
-        'direction' => 'buy'
-    ],
     'calendar' => [
         'within_blackout' => false
     ]
@@ -169,10 +151,7 @@ gates:
     z_abs_max: 1.0
     daily_loss_stop_pct: 3.0
 
-confluence:
-    news_threshold:
-        moderate: 0.3
-        strong: 0.45
+confluence: {}
 
 risk:
     per_trade_pct:
@@ -191,7 +170,6 @@ cooldowns:
 ### Service Configuration
 
 -   **`config/pricing.php`**: Price data provider settings
--   **`config/news.php`**: News API configuration
 -   **`config/decision.php`**: Decision engine parameters
 
 ## 🚀 Getting Started
@@ -236,10 +214,6 @@ DB_PASSWORD=your_password
 PRICE_DRIVER=twelvedata
 TWELVEDATA_API_KEY=your_api_key
 
-# News Data
-NEWS_PROVIDER=forexnewsapi
-FOREXNEWSAPI_TOKEN=your_token
-
 # IG Markets (for spreads and execution)
 IG_API_KEY=your_api_key
 IG_IDENTIFIER=your_username
@@ -270,7 +244,7 @@ composer run dev
 php artisan decision:preview EUR/USD
 
 # Force refresh all data sources
-php artisan decision:preview EUR/USD --force-news --force-calendar --force-sentiment
+php artisan decision:preview EUR/USD --force-sentiment
 
 # Strict mode (non-zero exit on hold)
 php artisan decision:preview EUR/USD --strict
@@ -286,7 +260,7 @@ php artisan context:preview EUR/USD
 php artisan context:preview EUR/USD --now="2025-09-14 14:30:00"
 
 # Force data refresh
-php artisan context:preview EUR/USD --force-news --force-calendar
+php artisan context:preview EUR/USD --force-calendar
 ```
 
 #### Data Management
@@ -297,9 +271,6 @@ php artisan candles:refresh EUR/USD --days=30
 
 # Import economic calendar
 php artisan calendar:import-csv /path/to/events.csv
-
-# Refresh news sentiment
-php artisan news:refresh EUR/USD
 
 # Reload trading rules
 php artisan rules:reload
@@ -318,7 +289,7 @@ The application includes a Livewire-powered web interface with:
 The system integrates with multiple external APIs:
 
 1. **TwelveData**: Historical and real-time price data
-2. **ForexNewsAPI**: News sentiment analysis
+2. **IG Client Sentiment**: Crowd positioning data for major markets
 3. **IG Markets**: Live spreads and trade execution
 4. **Economic Calendar**: High-impact event schedules
 
@@ -389,11 +360,11 @@ cooldowns:
 3. Add indicator logic to decision rules
 4. Write comprehensive tests
 
-### Custom News Providers
+### Custom Sentiment Providers
 
-1. Implement `NewsProvider` interface
-2. Register in `AppServiceProvider`
-3. Configure in `config/news.php`
+1. Implement `SentimentProvider` interface
+2. Register the provider binding in `AppServiceProvider`
+3. Configure cache or data source specifics as needed
 4. Add provider-specific tests
 
 ### Rule Modifications

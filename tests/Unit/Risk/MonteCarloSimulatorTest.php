@@ -7,8 +7,9 @@ use MathPHP\Probability\Distribution\Continuous\Normal;
 use MathPHP\Statistics\Average;
 
 it('generates paths from injected distribution', function () {
-    $simulator = new MonteCarloSimulator();
-    $distribution = new class([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) extends Normal {
+    $simulator = new MonteCarloSimulator;
+    $distribution = new class([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) extends Normal
+    {
         public function __construct(private array $values)
         {
             parent::__construct(0.0, 1.0);
@@ -29,7 +30,7 @@ it('generates paths from injected distribution', function () {
 });
 
 it('simulates normal paths with expected mean', function () {
-    $simulator = new MonteCarloSimulator();
+    $simulator = new MonteCarloSimulator;
     $paths = $simulator->simulateNormal(25, 40, 0.5, 1.5);
 
     $flattened = array_merge(...$paths);

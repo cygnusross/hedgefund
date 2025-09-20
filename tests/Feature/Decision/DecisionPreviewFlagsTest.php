@@ -5,20 +5,19 @@ declare(strict_types=1);
 use App\Application\ContextBuilder;
 use App\Domain\Rules\AlphaRules;
 
-it('forwards --force-calendar to ContextBuilder', function () {
+it('forwards --force-sentiment to ContextBuilder', function () {
     $capturer = new class
     {
         public array $lastBuildArgs = [];
 
-        public function build(string $pair, \DateTimeImmutable $ts, mixed $newsDateOrDays = null, bool $fresh = false, bool $forceSpread = false, array $opts = []): ?array
+        public function build(string $pair, \DateTimeImmutable $ts, bool $fresh = false, bool $forceSpread = false, array $opts = [], ?string $accountName = null): ?array
         {
-            $this->lastBuildArgs = compact('pair', 'ts', 'newsDateOrDays', 'fresh', 'forceSpread', 'opts');
+            $this->lastBuildArgs = compact('pair', 'ts', 'fresh', 'forceSpread', 'opts', 'accountName');
 
             return [
                 'meta' => ['pair_norm' => strtoupper(str_replace('/', '-', $pair)), 'data_age_sec' => 1],
                 'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.1],
                 'features' => [],
-                'news' => ['strength' => 0.0, 'direction' => 'neutral'],
                 'calendar' => ['within_blackout' => false],
             ];
         }
@@ -34,10 +33,10 @@ it('forwards --force-calendar to ContextBuilder', function () {
     $rules->reload();
     $this->instance(AlphaRules::class, $rules);
 
-    $this->artisan('decision:preview', ['pair' => 'EUR/USD', '--force-calendar' => true])
+    $this->artisan('decision:preview', ['pair' => 'EUR/USD', '--force-sentiment' => true])
         ->assertExitCode(0);
 
     // Inspect the capturer to ensure flags forwarded
     expect($capturer->lastBuildArgs)->toBeArray();
-    expect($capturer->lastBuildArgs['opts']['force_calendar'] ?? false)->toBeTrue();
+    expect($capturer->lastBuildArgs['opts']['force_sentiment'] ?? false)->toBeTrue();
 });

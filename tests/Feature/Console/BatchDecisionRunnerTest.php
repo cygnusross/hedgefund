@@ -32,7 +32,6 @@ test('batch decision runner analyzes active markets', function () {
 
     $this->artisan('decision:batch --dry-run')
         ->expectsOutput('🚀 Starting batch decision analysis...')
-        ->expectsOutput('📰 Ingesting fresh news data...')
         ->expectsOutput('📊 Analyzing 2 markets...')
         ->expectsOutput('🔍 Analyzing TEST/USD...')
         ->expectsOutput('🔍 Analyzing DEMO/USD...')

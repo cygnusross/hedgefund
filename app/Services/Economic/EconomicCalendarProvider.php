@@ -46,13 +46,14 @@ class EconomicCalendarProvider implements EconomicCalendarProviderContract
             $country = strtoupper((string) ($item['country'] ?? ''));
             $currency = strtoupper((string) ($item['currency'] ?? ''));
 
-            $dateUtc = null;
+            $dateUtc = '1970-01-01T00:00:00Z'; // Default value
             try {
                 if (! empty($item['date'])) {
                     $dateUtc = Carbon::parse($item['date'])->utc()->toIso8601String();
                 }
             } catch (\Throwable $e) {
-                $dateUtc = null;
+                // Log the error and use the default value
+                logger()->error('Failed to parse date', ['date' => $item['date'], 'error' => $e->getMessage()]);
             }
 
             $impact = ucfirst(strtolower((string) ($item['impact'] ?? '')));

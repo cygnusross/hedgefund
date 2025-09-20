@@ -1,6 +1,6 @@
 <?php
 
-$target = __DIR__ . '/../vendor/voku/portable-utf8/src/voku/helper/UTF8.php';
+$target = __DIR__.'/../vendor/voku/portable-utf8/src/voku/helper/UTF8.php';
 if (! is_file($target)) {
     return;
 }

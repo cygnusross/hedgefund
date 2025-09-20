@@ -1,17 +1,13 @@
 <?php
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Execution\PositionLedgerContract;
 use App\Domain\Rules\AlphaRules;
 
 it('computes size for eurusd', function () {
     $rulesYaml = <<<'YAML'
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.45
+gates: {}
 confluence: {}
 risk:
     per_trade_pct:
@@ -55,7 +51,6 @@ YAML;
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 10, 'sleeve_balance' => 10000.0],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5, 'ig_rules' => ['pip_value' => 1.0, 'size_step' => 0.01]],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -96,11 +91,7 @@ it('demonstrates account balance integration with position sizing', function () 
 
 it('computes size for usdjpy with different pip sizing', function () {
     $rulesYaml = <<<'YAML'
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.45
+gates: {}
 confluence: {}
 risk:
     per_trade_pct:
@@ -144,7 +135,6 @@ YAML;
         'meta' => ['pair_norm' => 'USDJPY', 'data_age_sec' => 10, 'sleeve_balance' => 10000.0],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 154.2, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5, 'ig_rules' => ['pip_value' => 0.9, 'size_step' => 0.01]],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 

@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Rules\AlphaRules;
 
 it('holds when ADX below configured minimum', function () {
@@ -20,7 +20,6 @@ it('holds when ADX below configured minimum', function () {
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 1],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'spread_estimate_pips' => 0.5, 'atr5m_pips' => 10],
         'features' => $featuresArr,
-        'news' => ['strength' => 0.0, 'direction' => 'neutral'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -49,7 +48,6 @@ it('holds when ema z stretched beyond configured max', function () {
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 1],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'spread_estimate_pips' => 0.5, 'atr5m_pips' => 10],
         'features' => $featuresArr,
-        'news' => ['strength' => 0.0, 'direction' => 'neutral'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -71,7 +69,6 @@ it('allows lower adx when market override present', function () {
     $prop->setAccessible(true);
     $prop->setValue($rules, [
         'gates' => [
-            'news_threshold' => ['strong' => 0.45, 'moderate' => 0.3, 'deadband' => 0.1],
             'adx_min' => 25,
             'atr_min_pips' => 2.5,
         ],
@@ -115,7 +112,6 @@ it('allows lower adx when market override present', function () {
             'williamsR' => -50,
             'cci' => 0,
         ],
-        'news' => ['strength' => 0.6, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -133,7 +129,6 @@ it('blocks when atr is below configured minimum', function () {
     $prop->setAccessible(true);
     $prop->setValue($rules, [
         'gates' => [
-            'news_threshold' => ['strong' => 0.45, 'moderate' => 0.3, 'deadband' => 0.1],
             'adx_min' => 25,
             'atr_min_pips' => 2.5,
         ],
@@ -176,7 +171,6 @@ it('blocks when atr is below configured minimum', function () {
             'williamsR' => -50,
             'cci' => 0,
         ],
-        'news' => ['strength' => 0.6, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 

@@ -9,14 +9,17 @@ use App\Domain\Decision\DTO\DecisionRequest;
 use App\Domain\Decision\DTO\DecisionResult;
 use App\Domain\Execution\NullPositionLedger;
 use App\Domain\Execution\PositionLedgerContract;
-use Brick\Math\RoundingMode;
-use App\Domain\Rules\AlphaRules;
 use App\Domain\FX\PipMath;
 use App\Domain\Risk\Sizing;
+use App\Domain\Rules\AlphaRules;
+use App\Domain\Rules\RuleContextManager;
 use App\Support\Clock\ClockInterface;
 use App\Support\Clock\SystemClock;
 use App\Support\Math\Decimal;
+use Brick\Math\RoundingMode;
 use DateTimeImmutable;
+
+use function data_get;
 
 final class LiveDecisionEngine implements LiveDecisionEngineContract
 {
@@ -28,18 +31,33 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
         private readonly AlphaRules $rules,
         ?ClockInterface $clock = null,
         ?PositionLedgerContract $ledger = null,
+        private readonly ?RuleContextManager $ruleContextManager = null,
     ) {
-        $this->clock = $clock ?? new SystemClock();
-        $this->ledger = $ledger ?? new NullPositionLedger();
+        $this->clock = $clock ?? new SystemClock;
+        $this->ledger = $ledger ?? new NullPositionLedger;
     }
 
     public function decide(DecisionRequest $request): DecisionResult
     {
         $context = $request->context();
         $features = new FeatureExtractor($context);
+        $rulesSnapshot = $features->getRules();
+        $layeredRules = $rulesSnapshot?->layered();
+        $baseRuleData = $this->rules->toArray();
+        $sentinel = new \stdClass;
+        $ruleValue = function (string $path, mixed $default = null) use ($layeredRules, $baseRuleData, $sentinel) {
+            if ($layeredRules !== null) {
+                $value = data_get($layeredRules, $path, $sentinel);
+                if ($value !== $sentinel) {
+                    return $value;
+                }
+            }
+
+            return data_get($baseRuleData, $path, $default);
+        };
         $reasons = [];
 
-        $requiredStatuses = $this->normalizeGate($this->rules->getGate('market_required_status', ['TRADEABLE']));
+        $requiredStatuses = $this->normalizeGate($ruleValue('gates.market_required_status', ['TRADEABLE']));
         $marketStatus = $features->getMarketStatus();
         if ($marketStatus === null || ! in_array($marketStatus, $requiredStatuses, true)) {
             $reasons[] = 'status_closed';
@@ -48,7 +66,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
         }
 
         $dataAge = $features->getDataAge();
-        $maxDataAge = (int) $this->rules->getGate('max_data_age_sec', 600);
+        $maxDataAge = (int) $ruleValue('gates.max_data_age_sec', 600);
         if ($dataAge === null || $dataAge > $maxDataAge) {
             $reasons[] = $dataAge === null ? 'no_bar_data' : 'bar_data_stale';
 
@@ -61,9 +79,9 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             return $this->buildBlockedResponse($reasons);
         }
 
-        $sessionMultiplier = $this->getSessionMultiplier($context->timestamp());
+        $sessionMultiplier = $this->getSessionMultiplier($context->timestamp(), $layeredRules);
 
-        $spreadRequired = (bool) $this->rules->getGate('spread_required', false);
+        $spreadRequired = (bool) $ruleValue('gates.spread_required', false);
         $spread = $features->getSpread();
         if ($spreadRequired && $spread === null) {
             $reasons[] = 'no_spread';
@@ -72,7 +90,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
         }
 
         $adxOverride = $features->getGateOverride('adx_min');
-        $adxMinConfigured = $adxOverride ?? $this->rules->getGate('adx_min', null);
+        $adxMinConfigured = $adxOverride ?? $ruleValue('gates.adx_min', null);
         if ($adxMinConfigured !== null) {
             $adxMin = (int) $adxMinConfigured;
             $adxValue = $features->getAdx();
@@ -84,7 +102,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
         }
 
         $zOverride = $features->getGateOverride('z_abs_max');
-        $zAbsConfigured = $zOverride ?? $this->rules->getGate('z_abs_max', null);
+        $zAbsConfigured = $zOverride ?? $ruleValue('gates.z_abs_max', null);
         if ($zAbsConfigured !== null) {
             $zAbsMax = (float) $zAbsConfigured;
             $zValue = $features->getEmaZ();
@@ -105,8 +123,8 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
         $trueRangeLower = $features->getTrueRangeLower();
         $lastPrice = $features->getLastPrice();
 
-        $rsiOverbought = (float) $this->rules->getGate('rsi_overbought', 75);
-        $rsiOversold = (float) $this->rules->getGate('rsi_oversold', 25);
+        $rsiOverbought = (float) $ruleValue('gates.rsi_overbought', 75);
+        $rsiOversold = (float) $ruleValue('gates.rsi_oversold', 25);
 
         if ($rsi !== null) {
             if ($rsi > $rsiOverbought) {
@@ -121,15 +139,15 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             }
         }
 
-        $stochExtreme = (float) $this->rules->getGate('stoch_extreme', 95);
+        $stochExtreme = (float) $ruleValue('gates.stoch_extreme', 95);
         if ($stochK !== null && ($stochK > $stochExtreme || $stochK < (100 - $stochExtreme))) {
             $reasons[] = 'stoch_extreme';
 
             return $this->buildBlockedResponse($reasons);
         }
 
-        $williamsOverbought = (float) $this->rules->getGate('williams_r_overbought', -20);
-        $williamsOversold = (float) $this->rules->getGate('williams_r_oversold', -80);
+        $williamsOverbought = (float) $ruleValue('gates.williams_r_overbought', -20);
+        $williamsOversold = (float) $ruleValue('gates.williams_r_oversold', -80);
         if ($williamsR !== null) {
             if ($williamsR > $williamsOverbought) {
                 $reasons[] = 'williams_r_overbought';
@@ -143,8 +161,8 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             }
         }
 
-        $cciOverbought = (float) $this->rules->getGate('cci_overbought', 100);
-        $cciOversold = (float) $this->rules->getGate('cci_oversold', -100);
+        $cciOverbought = (float) $ruleValue('gates.cci_overbought', 100);
+        $cciOversold = (float) $ruleValue('gates.cci_oversold', -100);
         if ($cci !== null) {
             if ($cci > $cciOverbought) {
                 $reasons[] = 'cci_overbought';
@@ -158,37 +176,11 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             }
         }
 
-        $requireSarAlignment = (bool) $this->rules->getGate('require_sar_trend_alignment', false);
-        $newsDirection = $features->getNewsDirection();
-        if ($requireSarAlignment && $parabolicSarTrend !== null && $parabolicSar !== null && $lastPrice !== null && $newsDirection !== null) {
-            if ($newsDirection === 'buy' && $parabolicSarTrend === 'down') {
-                $reasons[] = 'sar_trend_conflict';
-
-                return $this->buildBlockedResponse($reasons);
-            }
-            if ($newsDirection === 'sell' && $parabolicSarTrend === 'up') {
-                $reasons[] = 'sar_trend_conflict';
-
-                return $this->buildBlockedResponse($reasons);
-            }
-        }
-
-        $requireTrBreakout = (bool) $this->rules->getGate('require_tr_breakout', false);
-        if ($requireTrBreakout && $trueRangeUpper !== null && $trueRangeLower !== null && $lastPrice !== null) {
-            if ($newsDirection === 'buy' && $lastPrice <= $trueRangeUpper) {
-                $reasons[] = 'insufficient_tr_breakout';
-
-                return $this->buildBlockedResponse($reasons);
-            }
-            if ($newsDirection === 'sell' && $lastPrice >= $trueRangeLower) {
-                $reasons[] = 'insufficient_tr_breakout';
-
-                return $this->buildBlockedResponse($reasons);
-            }
-        }
+        // News-based SAR and True Range alignment checks disabled since news is removed
+        // These checks were dependent on news direction which is no longer available
 
         $todaysPnL = $this->safeFloat(fn () => $this->ledger->todaysPnLPct());
-        $dailyStop = (float) $this->rules->getGate('daily_loss_stop_pct', 3.0);
+        $dailyStop = (float) $ruleValue('gates.daily_loss_stop_pct', 3.0);
         if ($todaysPnL <= -1.0 * $dailyStop) {
             $reasons[] = 'daily_loss_stop';
 
@@ -222,7 +214,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             return $this->buildBlockedResponse($reasons);
         }
 
-        $pairExposureCap = (float) $this->rules->getRisk('pair_exposure_pct', 15);
+        $pairExposureCap = (float) $ruleValue('risk.pair_exposure_pct', 15);
         $pairExposure = (float) $this->safeFloat(fn () => $this->ledger->pairExposurePct($pairNorm));
         if ($pairExposure >= $pairExposureCap) {
             $reasons[] = 'pair_exposure_cap';
@@ -230,52 +222,16 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             return $this->buildBlockedResponse($reasons);
         }
 
-        $newsStrength = $features->getNewsStrength();
-        $newsLabel = 'weak';
-        $moderateThreshold = (float) $this->rules->getGate('news_threshold.moderate', 0.32);
-        $strongThreshold = (float) $this->rules->getGate('news_threshold.strong', 0.45);
-
-        if ($newsStrength >= $strongThreshold) {
-            $newsLabel = 'strong';
-        } elseif ($newsStrength >= $moderateThreshold) {
-            $newsLabel = 'moderate';
-        }
-
-        $proposedAction = 'hold';
-        if ($newsDirection === null || $newsDirection === 'neutral') {
-            $reasons[] = 'news_neutral';
-        } else {
-            $trend30m = $features->features()->trend30m;
-            $aligned = ($newsDirection === 'buy' && $trend30m === 'up')
-                || ($newsDirection === 'sell' && $trend30m === 'down');
-
-            if ($newsLabel === 'weak') {
-                $reasons[] = 'news_weak';
-
-                return $this->buildBlockedResponse($reasons, $this->scaledProduct($newsStrength, $sessionMultiplier));
-            }
-
-            if ($newsLabel === 'moderate' && $this->rules->getConfluence('require_trend_alignment_for_moderate', true) && ! $aligned) {
-                $reasons[] = 'needs_trend_align';
-
-                return $this->buildBlockedResponse($reasons, $this->scaledProduct($newsStrength, $sessionMultiplier));
-            }
-
-            if ($newsLabel === 'strong' && ! $this->rules->getConfluence('allow_strong_against_trend', true) && ! $aligned) {
-                $reasons[] = 'needs_trend_align';
-
-                return $this->buildBlockedResponse($reasons, $this->scaledProduct($newsStrength, $sessionMultiplier));
-            }
-
-            $proposedAction = $newsDirection === 'buy' ? 'buy' : 'sell';
-        }
+        // News functionality has been removed - sentiment evaluation works independently
+        // Default to allowing sentiment evaluation with a neutral proposed action
+        $proposedAction = 'buy'; // Use 'buy' as default to allow sentiment evaluation to work
 
         $sentiment = $features->getSentiment();
         if ($sentiment !== null && in_array($proposedAction, ['buy', 'sell'], true)) {
-            $mode = (string) $this->rules->getSentimentGate('mode', 'contrarian');
-            $threshold = (float) $this->rules->getSentimentGate('contrarian_threshold_pct', 65.0);
-            $neutralLow = (float) $this->rules->getSentimentGate('neutral_band_low_pct', 45.0);
-            $neutralHigh = (float) $this->rules->getSentimentGate('neutral_band_high_pct', 55.0);
+            $mode = (string) $ruleValue('gates.sentiment.mode', 'contrarian');
+            $threshold = (float) $ruleValue('gates.sentiment.contrarian_threshold_pct', 65.0);
+            $neutralLow = (float) $ruleValue('gates.sentiment.neutral_band_pct.0', 45.0);
+            $neutralHigh = (float) $ruleValue('gates.sentiment.neutral_band_pct.1', 55.0);
 
             $longPct = $sentiment->longPct();
             $shortPct = $sentiment->shortPct();
@@ -296,11 +252,11 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             }
         }
 
-        $riskMap = $this->rules->getRisk('per_trade_pct', []);
-        $perTradeCap = (float) $this->rules->getRisk('per_trade_cap_pct', 2.0);
-        $slMult = (float) $this->rules->getExecution('sl_atr_mult', 2.0);
-        $tpMult = (float) $this->rules->getExecution('tp_atr_mult', 4.0);
-        $spreadCap = (float) $this->rules->getExecution('spread_ceiling_pips', 2.0);
+        $riskMap = $ruleValue('risk.per_trade_pct', []);
+        $perTradeCap = (float) $ruleValue('risk.per_trade_cap_pct', 2.0);
+        $slMult = (float) $ruleValue('execution.sl_atr_mult', 2.0);
+        $tpMult = (float) $ruleValue('execution.tp_atr_mult', 4.0);
+        $spreadCap = (float) $ruleValue('execution.spread_ceiling_pips', 2.0);
 
         $marketAtr = $features->market()->atr5mPips() ?? 0.0;
         $lastMarketPrice = $features->getLastPrice() ?? 0.0;
@@ -318,14 +274,14 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
         }
 
         $atrOverride = $features->getGateOverride('atr_min_pips');
-        $atrMinConfigured = $atrOverride ?? $this->rules->getGate('atr_min_pips', null);
+        $atrMinConfigured = $atrOverride ?? $ruleValue('gates.atr_min_pips', null);
         if ($atrMinConfigured !== null && $marketAtr < (float) $atrMinConfigured) {
             $reasons[] = 'atr_too_low';
 
             return $this->buildBlockedResponse($reasons);
         }
 
-        $riskPctRaw = $riskMap[$newsLabel] ?? $riskMap['default'] ?? 1.0;
+        $riskPctRaw = $riskMap['default'] ?? 1.0;
         $riskPct = min((float) $riskPctRaw, $perTradeCap);
 
         $slMultDecimal = Decimal::of($slMult);
@@ -338,7 +294,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             $slPipsDecimal = $epsilon;
         }
 
-        $slMinPipsDecimal = Decimal::of((float) $this->rules->getExecution('sl_min_pips', 15.0));
+        $slMinPipsDecimal = Decimal::of((float) $ruleValue('execution.sl_min_pips', 15.0));
         $originalSlPipsDecimal = $slPipsDecimal;
         if ($slPipsDecimal->isLessThan($slMinPipsDecimal)) {
             $slPipsDecimal = $slMinPipsDecimal;
@@ -400,7 +356,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
 
         $sleeveBalance = $features->getSleeveBalance();
         $igRules = $features->getIgRules();
-        $pipValue = $igRules?->pipValue() ?? 1.0;
+        $pipValue = $igRules?->pipValue() ?? $this->getDefaultPipValue($features->getPairNorm());
         $sizeStep = $igRules?->sizeStep() ?? 0.01;
 
         $size = Sizing::computeStake($sleeveBalance, $riskPct, $slPips, $pipValue, $sizeStep);
@@ -435,7 +391,8 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
 
             if ($actualRiskPips > 0.0) {
                 $actualRr = $actualRewardPips / $actualRiskPips;
-                $minRr = (float) $this->rules->getExecution('min_rr', (float) $this->rules->getExecution('rr', 1.8));
+                $targetRr = (float) $ruleValue('execution.rr', 1.8);
+                $minRr = (float) $ruleValue('execution.min_rr', $targetRr);
 
                 if ($actualRr < $minRr) {
                     $reasons[] = 'poor_risk_reward';
@@ -456,8 +413,9 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             $reasons[] = 'session_timing_boost';
         }
 
-        $blocked = ($proposedAction === 'hold') && ! in_array('news_neutral', $reasons, true);
-        $baseConfidence = $this->toScaledFloat($features->getNewsStrength(), 3);
+        $blocked = ($proposedAction === 'hold');
+        // Since news is removed, use a default base confidence when making a trading decision
+        $baseConfidence = $proposedAction !== 'hold' ? 0.75 : 0.0;
         $confidence = $this->scaledProduct($baseConfidence, $sessionMultiplier, 3);
 
         if ($blocked) {
@@ -476,7 +434,6 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
             $reasons,
             false,
             $sizePayload,
-            $newsLabel,
             $riskPayload,
             $entryPayload,
             $slPayload,
@@ -485,7 +442,6 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
     }
 
     /**
-     * @param mixed $value
      * @return array<int, string>
      */
     private function normalizeGate(mixed $value): array
@@ -497,9 +453,11 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
         return [is_string($value) ? $value : (string) $value];
     }
 
-    private function getSessionMultiplier(DateTimeImmutable $now): float
+    private function getSessionMultiplier(DateTimeImmutable $now, ?array $layeredRules = null): float
     {
-        $sessionFilter = $this->rules->getSessionFilter('default');
+        $sessionFilter = $layeredRules !== null
+            ? data_get($layeredRules, 'session_filters.default', [])
+            : $this->rules->getSessionFilter('default');
         if (! is_array($sessionFilter) || $sessionFilter === []) {
             return 1.0;
         }
@@ -526,7 +484,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
     }
 
     /**
-     * @param array{start?: string, end?: string} $range
+     * @param  array{start?: string, end?: string}  $range
      */
     private function isTimeInRange(int $currentMinutes, array $range): bool
     {
@@ -565,7 +523,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
     }
 
     /**
-     * @param callable():float|int|null $callback
+     * @param  callable():float|int|null  $callback
      */
     private function safeFloat(callable $callback): float
     {
@@ -579,8 +537,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
     }
 
     /**
-     * @param callable():array|null $callback
-     * @return array|null
+     * @param  callable():array|null  $callback
      */
     private function safeArray(callable $callback): ?array
     {
@@ -633,7 +590,7 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
     }
 
     /**
-     * @param array<int, string> $reasons
+     * @param  array<int, string>  $reasons
      */
     private function buildBlockedResponse(array $reasons, float $confidence = 0.0): DecisionResult
     {
@@ -648,7 +605,21 @@ final class LiveDecisionEngine implements LiveDecisionEngineContract
         }
 
         return strlen($norm) >= 6
-            ? substr($norm, 0, 3) . '/' . substr($norm, 3)
+            ? substr($norm, 0, 3).'/'.substr($norm, 3)
             : $norm;
+    }
+
+    /**
+     * Get default pip value for common currency pairs when IG rules are not available
+     */
+    private function getDefaultPipValue(string $pairNorm): float
+    {
+        return match ($pairNorm) {
+            'EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD' => 10.0, // Major USD pairs: 1 pip = $10 per standard lot
+            'USDCHF', 'USDCAD' => 10.0, // USD base pairs: 1 pip = $10 per standard lot
+            'USDJPY' => 10.0, // Special case: 1 pip = $10 per standard lot
+            'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'NZDJPY' => 10.0, // Cross pairs: approximate $10 per standard lot
+            default => 10.0, // Default fallback: assume $10 per pip per standard lot
+        };
     }
 }

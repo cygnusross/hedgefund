@@ -2,7 +2,6 @@
 
 namespace App\Providers;
 
-use App\Domain\FX\Contracts\SpreadEstimatorContract;
 use App\Domain\FX\DatabaseSpreadEstimator;
 use App\Domain\FX\SpreadEstimator;
 use Illuminate\Support\ServiceProvider;
@@ -16,7 +15,7 @@ class SpreadServiceProvider extends ServiceProvider
     {
         $this->app->singleton(\App\Domain\FX\Contracts\SpreadEstimatorContract::class, function ($app) {
             if ($this->backtestEnabled()) {
-                return new DatabaseSpreadEstimator();
+                return new DatabaseSpreadEstimator;
             }
 
             $ig = $app->make(\App\Services\IG\Client::class);

@@ -21,9 +21,9 @@ final class MonteCarloSimulator
             return [];
         }
 
-        $series = new Vector();
+        $series = new Vector;
         for ($i = 0; $i < $paths; $i++) {
-            $path = new Vector();
+            $path = new Vector;
             for ($j = 0; $j < $steps; $j++) {
                 $path->push((float) $distribution->rand());
             }

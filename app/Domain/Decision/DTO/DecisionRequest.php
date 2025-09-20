@@ -8,12 +8,10 @@ use App\Domain\Decision\Contracts\DecisionContextContract;
 
 final readonly class DecisionRequest
 {
-    public function __construct(private ContextSnapshot $context)
-    {
-    }
+    public function __construct(private ContextSnapshot $context) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public static function fromArray(array $payload): self
     {

@@ -8,7 +8,7 @@ use App\Domain\Decision\LiveDecisionEngine;
 use App\Models\Candle;
 use Illuminate\Support\Carbon;
 
-final class BacktestRunner
+class BacktestRunner
 {
     public function __construct(
         private ContextBuilder $contextBuilder,

@@ -2,16 +2,15 @@
 
 namespace App\Console\Commands;
 
+use App\Application\ContextBuilder;
 use App\Backtest\BacktestLedger;
 use App\Backtest\BacktestRunner;
-use App\Application\ContextBuilder;
 use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Rules\AlphaRules;
 use App\Models\Market;
 use App\Support\Clock\ClockInterface;
 use App\Support\Math\Decimal;
 use Brick\Math\RoundingMode;
-use DateInterval;
 use DateTimeImmutable;
 use DateTimeZone;
 use Illuminate\Console\Command;
@@ -46,7 +45,7 @@ class BacktestRun extends Command
             return self::FAILURE;
         }
 
-        $ledger = new BacktestLedger();
+        $ledger = new BacktestLedger;
         $contextBuilder = app(ContextBuilder::class);
         $rules = app(AlphaRules::class);
         $clock = app(ClockInterface::class);

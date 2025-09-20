@@ -58,9 +58,8 @@ class BatchDecisionRunner extends Command
                 $ctx = $builder->build(
                     $market->symbol,
                     $now,
-                    null,
-                    false, // calendar already refreshed by schedule
-                    false, // sentiment not needed for decisions
+                    false, // avoid forcing new candle fetch
+                    false, // reuse cached spread estimates where possible
                     [],
                     $this->option('account')
                 );

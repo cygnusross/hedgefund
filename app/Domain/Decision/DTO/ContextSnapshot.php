@@ -15,15 +15,14 @@ final readonly class ContextSnapshot
         private DateTimeImmutable $timestamp,
         private FeatureSet $features,
         private MarketSnapshot $market,
-        private NewsSnapshot $news,
         private MetaSnapshot $meta,
         private CalendarSnapshot $calendar,
         private bool $isBlackout,
-    ) {
-    }
+        private ?RulesSnapshot $rules = null,
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public static function fromArray(array $payload): self
     {
@@ -42,12 +41,17 @@ final readonly class ContextSnapshot
 
         $features = FeatureSetFactory::fromArray($timestamp, $payload['features'] ?? []);
         $market = MarketSnapshot::fromArray($payload['market'] ?? []);
-        $news = NewsSnapshot::fromArray($payload['news'] ?? []);
         $meta = MetaSnapshot::fromArray($payload['meta'] ?? []);
         $calendar = CalendarSnapshot::fromArray($payload['calendar'] ?? []);
         $blackout = isset($payload['blackout']) ? (bool) $payload['blackout'] : $calendar->withinBlackout();
 
-        return new self($pair, $timestamp, $features, $market, $news, $meta, $calendar, $blackout);
+        $rulesPayload = $payload['rules'] ?? null;
+        $rules = null;
+        if (is_array($rulesPayload) && $rulesPayload !== []) {
+            $rules = RulesSnapshot::fromArray($rulesPayload);
+        }
+
+        return new self($pair, $timestamp, $features, $market, $meta, $calendar, $blackout, $rules);
     }
 
     public function pair(): string
@@ -70,11 +74,6 @@ final readonly class ContextSnapshot
         return $this->market;
     }
 
-    public function news(): NewsSnapshot
-    {
-        return $this->news;
-    }
-
     public function meta(): MetaSnapshot
     {
         return $this->meta;
@@ -89,12 +88,17 @@ final readonly class ContextSnapshot
     {
         return $this->isBlackout;
     }
+
+    public function rules(): ?RulesSnapshot
+    {
+        return $this->rules;
+    }
 }
 
 final class FeatureSetFactory
 {
     /**
-     * @param array<string, mixed> $features
+     * @param  array<string, mixed>  $features
      */
     public static function fromArray(DateTimeImmutable $ts, array $features): FeatureSet
     {

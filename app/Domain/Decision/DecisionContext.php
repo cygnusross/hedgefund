@@ -7,6 +7,7 @@ namespace App\Domain\Decision;
 use App\Domain\Decision\Contracts\DecisionContextContract;
 use App\Domain\Decision\DTO\DecisionMetadata;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\DTO\RulesSnapshot;
 use App\Domain\Market\FeatureSet;
 
 final class DecisionContext implements DecisionContextContract
@@ -18,6 +19,7 @@ final class DecisionContext implements DecisionContextContract
         private readonly \DateTimeImmutable $ts,
         private readonly FeatureSet $features,
         ?DecisionMetadata $meta = null,
+        private readonly ?RulesSnapshot $rules = null,
     ) {
         $this->meta = $meta ?? new DecisionMetadata;
     }
@@ -42,6 +44,11 @@ final class DecisionContext implements DecisionContextContract
         return $this->meta;
     }
 
+    public function rules(): ?RulesSnapshot
+    {
+        return $this->rules;
+    }
+
     public function toRequest(): DecisionRequest
     {
         return DecisionRequest::fromArray($this->toArray());
@@ -49,12 +56,18 @@ final class DecisionContext implements DecisionContextContract
 
     public function toArray(): array
     {
-        return [
+        $payload = [
             'pair' => $this->pair,
             'ts' => $this->ts->format(DATE_ATOM),
             'features' => $this->featuresToArray($this->features),
             'meta' => $this->meta->toArray(),
         ];
+
+        if ($this->rules !== null) {
+            $payload['rules'] = $this->rules->toArray();
+        }
+
+        return $payload;
     }
 
     /**

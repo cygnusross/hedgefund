@@ -11,4 +11,3 @@ interface LiveDecisionEngineContract
 {
     public function decide(DecisionRequest $request): DecisionResult;
 }
-

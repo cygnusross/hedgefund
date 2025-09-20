@@ -14,11 +14,10 @@ final readonly class MarketSnapshot
         private ?SentimentSnapshot $sentiment,
         private ?IgRulesSnapshot $igRules,
         private array $gateOverrides = [],
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $market
+     * @param  array<string, mixed>  $market
      */
     public static function fromArray(array $market): self
     {

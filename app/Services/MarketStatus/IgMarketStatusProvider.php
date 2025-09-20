@@ -14,8 +14,7 @@ final class IgMarketStatusProvider implements MarketStatusProvider
     public function __construct(
         private MarketsEndpoint $marketsEndpoint,
         private ?CacheRepository $cache = null,
-    ) {
-    }
+    ) {}
 
     public function fetch(string $pair, \DateTimeImmutable $nowUtc, array $opts = []): array
     {

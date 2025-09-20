@@ -3,10 +3,10 @@
 namespace App\Domain\FX;
 
 use App\Domain\FX\Contracts\SpreadEstimatorContract;
-use App\Support\Math\Decimal;
-use Brick\Math\RoundingMode;
 use App\Models\Market;
 use App\Services\IG\Client as IgClient;
+use App\Support\Math\Decimal;
+use Brick\Math\RoundingMode;
 use Illuminate\Contracts\Cache\Repository as CacheRepo;
 use Illuminate\Support\Facades\Log as LogFacade;
 use Psr\Log\LoggerInterface;
@@ -335,7 +335,7 @@ class SpreadEstimator implements SpreadEstimatorContract
 
         $normalizedPair = strtoupper(str_replace(['/', '-'], ['/', '/'], $pair));
         if (! str_contains($normalizedPair, '/') && strlen($normalizedPair) >= 6) {
-            $normalizedPair = substr($normalizedPair, 0, 3) . '/' . substr($normalizedPair, 3, 3);
+            $normalizedPair = substr($normalizedPair, 0, 3).'/'.substr($normalizedPair, 3, 3);
         }
         $altPair = str_replace('/', '-', $normalizedPair);
 

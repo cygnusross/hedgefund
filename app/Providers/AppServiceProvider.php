@@ -13,23 +13,29 @@ TASK: Bind the ClientSentimentProvider via the container so tests can mock it.
 
 namespace App\Providers;
 
-use App\Application\Candles\DatabaseCandleProvider;
 use App\Domain\Decision\Contracts\DecisionContextContract;
 use App\Domain\Decision\Contracts\LiveDecisionEngineContract;
 use App\Domain\Decision\DecisionContext;
 use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Execution\PositionLedgerContract;
+use App\Domain\Market\Contracts\MarketStatusProvider as MarketStatusProviderContract;
 use App\Domain\Rules\AlphaRules;
+use App\Domain\Rules\Calibration\CalibrationPipeline;
+use App\Domain\Rules\Calibration\CandidateGenerator;
+use App\Domain\Rules\Calibration\CandidateScorer;
+use App\Domain\Rules\Calibration\FeatureSnapshotService;
+use App\Domain\Rules\Calibration\MonteCarloEvaluator;
+use App\Domain\Rules\Calibration\RubixMLPipeline;
+use App\Domain\Rules\RuleContextManager;
+use App\Domain\Rules\RuleResolver;
+use App\Domain\Rules\RuleSetRepository;
 use App\Domain\Sentiment\Contracts\SentimentProvider as SentimentProviderContract;
+use App\Services\Economic\DatabaseEconomicCalendarProvider;
+use App\Services\IG\ClientSentimentProvider as IgSentimentProvider;
+use App\Services\MarketStatus\IgMarketStatusProvider;
 use App\Support\Clock\ClockInterface;
 use App\Support\Clock\SystemClock;
-use App\Domain\Market\Contracts\MarketStatusProvider as MarketStatusProviderContract;
-use App\Services\IG\ClientSentimentProvider as IgSentimentProvider;
-use App\Services\Economic\DatabaseEconomicCalendarProvider;
-use App\Services\MarketStatus\DatabaseMarketStatusProvider;
-use App\Services\MarketStatus\IgMarketStatusProvider;
-use App\Services\Prices\DatabasePriceProvider;
-use App\Services\Sentiment\DatabaseSentimentProvider;
+use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -59,19 +65,6 @@ class AppServiceProvider extends ServiceProvider
             };
         });
 
-        // Bind the NewsProvider implementation based on config/news.php
-        $this->app->singleton(\App\Services\News\NewsProvider::class, function ($app) {
-            $driver = config('news.default', 'forexnewsapi');
-
-            return match ($driver) {
-                'forexnewsapi' => new \App\Services\News\ForexNewsApiProvider,
-                default => throw new \RuntimeException("Unknown news provider [{$driver}] configured in config/news.php"),
-            };
-        });
-
-        // Bind NewsService for dependency injection
-        $this->app->bind(\App\Application\News\NewsServiceInterface::class, \App\Application\News\NewsService::class);
-
         // Bind IG Historical Prices Endpoint
         $this->app->bind(\App\Services\IG\Endpoints\HistoricalPricesEndpoint::class, function ($app) {
             return new \App\Services\IG\Endpoints\HistoricalPricesEndpoint(
@@ -82,7 +75,7 @@ class AppServiceProvider extends ServiceProvider
         // Bind the EconomicCalendarProvider for fetching/caching economic calendar data
         $this->app->singleton(\App\Services\Economic\EconomicCalendarProvider::class, function ($app) {
             if ($this->backtestEnabled()) {
-                return new DatabaseEconomicCalendarProvider();
+                return new DatabaseEconomicCalendarProvider;
             }
 
             return new \App\Services\Economic\EconomicCalendarProvider;
@@ -125,10 +118,46 @@ class AppServiceProvider extends ServiceProvider
             return new LiveDecisionEngine($rules, $clock, $ledger);
         });
 
+        $this->app->singleton(RuleSetRepository::class, fn () => new RuleSetRepository);
+
+        $this->app->singleton(RuleResolver::class, function ($app) {
+            $cacheFactory = $app->make(CacheFactory::class);
+            $defaultStore = config('cache.default');
+
+            $store = $cacheFactory->store();
+            if ($defaultStore === 'redis' && ! class_exists(\Redis::class)) {
+                $store = $cacheFactory->store('array');
+            }
+
+            return new RuleResolver(
+                $app->make(RuleSetRepository::class),
+                $store
+            );
+        });
+
+        $this->app->singleton(RuleContextManager::class, fn ($app) => new RuleContextManager($app->make(RuleResolver::class)));
+
+        $this->app->singleton(FeatureSnapshotService::class, fn () => new FeatureSnapshotService);
+        $this->app->singleton(CandidateGenerator::class, fn () => new CandidateGenerator);
+        $this->app->singleton(RubixMLPipeline::class, fn () => new RubixMLPipeline);
+        $this->app->singleton(CandidateScorer::class, fn ($app) => new CandidateScorer($app->make(RubixMLPipeline::class)));
+        $this->app->singleton(MonteCarloEvaluator::class, fn () => new MonteCarloEvaluator);
+
+        $this->app->singleton(CalibrationPipeline::class, function ($app) {
+            return new CalibrationPipeline(
+                $app->make(RuleResolver::class),
+                $app->make(FeatureSnapshotService::class),
+                $app->make(CandidateGenerator::class),
+                $app->make(CandidateScorer::class),
+                $app->make(MonteCarloEvaluator::class)
+            );
+        });
+
         // Bind AlphaRules loader as a singleton
         $this->app->singleton(AlphaRules::class, function ($app) {
             $path = env('RULES_YAML_PATH', storage_path('app/alpha_rules.yaml'));
-            $rules = new AlphaRules($path);
+            $resolver = $app->make(RuleResolver::class);
+            $rules = new AlphaRules($path, $resolver);
             // Attempt initial load but do not fail bootstrap if file absent; let reload() throw when called explicitly
             try {
                 $rules->reload();

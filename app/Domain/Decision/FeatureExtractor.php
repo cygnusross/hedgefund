@@ -7,15 +7,13 @@ namespace App\Domain\Decision;
 use App\Domain\Decision\DTO\ContextSnapshot;
 use App\Domain\Decision\DTO\IgRulesSnapshot;
 use App\Domain\Decision\DTO\MarketSnapshot;
-use App\Domain\Decision\DTO\NewsSnapshot;
+use App\Domain\Decision\DTO\RulesSnapshot;
 use App\Domain\Decision\DTO\SentimentSnapshot;
 use App\Domain\Market\FeatureSet;
 
 final readonly class FeatureExtractor
 {
-    public function __construct(private ContextSnapshot $context)
-    {
-    }
+    public function __construct(private ContextSnapshot $context) {}
 
     public function features(): FeatureSet
     {
@@ -25,11 +23,6 @@ final readonly class FeatureExtractor
     public function market(): MarketSnapshot
     {
         return $this->context->market();
-    }
-
-    public function news(): NewsSnapshot
-    {
-        return $this->context->news();
     }
 
     public function meta(): \App\Domain\Decision\DTO\MetaSnapshot
@@ -122,16 +115,6 @@ final readonly class FeatureExtractor
         return $this->market()->status();
     }
 
-    public function getNewsDirection(): ?string
-    {
-        return $this->news()->direction();
-    }
-
-    public function getNewsStrength(): float
-    {
-        return $this->news()->strength();
-    }
-
     public function getDataAge(): ?int
     {
         return $this->meta()->dataAgeSec();
@@ -160,6 +143,11 @@ final readonly class FeatureExtractor
     public function getIgRules(): ?IgRulesSnapshot
     {
         return $this->market()->igRules();
+    }
+
+    public function getRules(): ?RulesSnapshot
+    {
+        return $this->context->rules();
     }
 
     public function getGateOverride(string $key): ?float

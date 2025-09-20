@@ -2,18 +2,14 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Rules\AlphaRules;
 
 it('holds when contrarian sentiment is against proposed action', function () {
     // Create a minimal rules YAML on disk and load it via AlphaRules
     $yaml = <<<'YAML'
 gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.45
     sentiment:
         mode: contrarian
         contrarian_threshold_pct: 60.0
@@ -48,8 +44,9 @@ YAML;
             'spread_estimate_pips' => 0.5,
             'sentiment' => ['long_pct' => 70.0, 'short_pct' => 30.0],
         ],
-        'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'], // moderate
+        'features' => [
+            'trend30m' => 'up',
+        ],
         'calendar' => ['within_blackout' => false],
     ];
 

@@ -19,6 +19,7 @@ class Candle extends Model
         'low',
         'close',
         'volume',
+        'provider',
     ];
 
     protected function casts(): array

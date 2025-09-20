@@ -14,13 +14,13 @@ it('includes spread_estimate_pips when SpreadEstimator returns a value', functio
 
     $bars5 = [];
     for ($i = 0; $i < 100; $i++) {
-        $ts = $now->sub(new DateInterval('PT'.(5 * (100 - $i)).'M'));
+        $ts = $now->sub(new DateInterval('PT' . (5 * (100 - $i)) . 'M'));
         $bars5[] = new \App\Domain\Market\Bar($ts, 1.0, 1.1, 0.9, 1.05, 100);
     }
 
     $bars30 = [];
     for ($i = 0; $i < 50; $i++) {
-        $ts = $now->sub(new DateInterval('PT'.(30 * (50 - $i)).'M'));
+        $ts = $now->sub(new DateInterval('PT' . (30 * (50 - $i)) . 'M'));
         $bars30[] = new \App\Domain\Market\Bar($ts, 1.0, 1.1, 0.9, 1.05, 100);
     }
 
@@ -31,14 +31,6 @@ it('includes spread_estimate_pips when SpreadEstimator returns a value', functio
         public function sync(string $symbol, string $interval, int $limit, int $overlapBars = 2, int $tailFetchLimit = 200): array
         {
             return $interval === '5min' ? $this->b5 : $this->b30;
-        }
-    };
-
-    $newsProvider = new class implements \App\Services\News\NewsProvider
-    {
-        public function fetchStat(string $pair, string $date = 'today', bool $fresh = false): array
-        {
-            return ['pair' => str_replace('/', '-', strtoupper($pair)), 'date' => $date, 'pos' => 0, 'neg' => 0, 'neu' => 0, 'score' => 0.0];
         }
     };
 
@@ -57,7 +49,7 @@ it('includes spread_estimate_pips when SpreadEstimator returns a value', functio
 
     $mockEstimator = Mockery::mock(SpreadEstimatorContract::class);
     $mockEstimator->shouldReceive('estimatePipsForPair')->andReturn(0.9);
-    $mockEstimator->shouldReceive('getMarketStatusForPair')->andReturn('OPEN');
+    $mockEstimator->shouldReceive('getMarketStatusForPair')->andReturn('TRADEABLE');
 
     $builder = new ContextBuilder($updater, new CalendarLookup($calendarProvider), $mockEstimator);
 
@@ -68,5 +60,5 @@ it('includes spread_estimate_pips when SpreadEstimator returns a value', functio
     expect($res['market'])->toHaveKey('spread_estimate_pips');
     expect($res['market']['spread_estimate_pips'])->toBe(0.9);
     expect($res['market'])->toHaveKey('status');
-    expect($res['market']['status'])->toBe('OPEN');
+    expect($res['market']['status'])->toBe('TRADEABLE');
 });

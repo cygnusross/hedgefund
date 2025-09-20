@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Rules\AlphaRules;
 
 it('allows trading with reduced confidence during avoided sessions', function () {
@@ -11,17 +11,11 @@ it('allows trading with reduced confidence during avoided sessions', function ()
     $rulesYaml = <<<'YAML'
 schema_version: "1.1"
 gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.32
-        strong: 0.50
     market_required_status: ["TRADEABLE"]
     spread_required: false
     max_data_age_sec: 600
 confluence: {}
-risk:
-    default: 0.009
-    strong_news: 0.018
+risk: {}
 execution:
     sl_atr_mult: 2.0
     tp_atr_mult: 4.0
@@ -56,7 +50,6 @@ YAML;
             'adx5m' => 39.0, // Strong trend
             'ema20_z' => -0.95, // Oversold
         ],
-        'news' => ['strength' => 0.75, 'direction' => 'buy'], // Strong news
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -90,7 +83,6 @@ YAML;
     expect($result['blocked'] ?? false)->toBeFalse();
     expect($result['confidence'])->toBeGreaterThan(0.0);
     expect($result['confidence'])->toBeLessThan(0.75); // Reduced from original 0.75 due to session penalty
-    expect($result['news_label'] ?? null)->toBe('strong');
     expect($result['reasons'])->toContain('session_timing_penalty');
     expect($result['reasons'])->toContain('ok');
 
@@ -103,17 +95,11 @@ it('allows trading with boosted confidence during preferred sessions', function 
     $rulesYaml = <<<'YAML'
 schema_version: "1.1"
 gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.32
-        strong: 0.50
     market_required_status: ["TRADEABLE"]
     spread_required: false
     max_data_age_sec: 600
 confluence: {}
-risk:
-    default: 0.009
-    strong_news: 0.018
+risk: {}
 execution:
     sl_atr_mult: 2.0
     tp_atr_mult: 4.0
@@ -148,7 +134,6 @@ YAML;
             'adx5m' => 25.0, // Moderate trend
             'ema20_z' => 0.5,
         ],
-        'news' => ['strength' => 0.4, 'direction' => 'buy'], // Moderate news
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -179,7 +164,6 @@ YAML;
     expect($result['action'])->toBe('buy');
     expect($result['blocked'] ?? false)->toBeFalse();
     expect($result['confidence'])->toBeGreaterThan(0.4); // Boosted from original 0.4 due to session bonus
-    expect($result['news_label'] ?? null)->toBe('moderate');
     expect($result['reasons'])->toContain('session_timing_boost');
     expect($result['reasons'])->toContain('ok');
 

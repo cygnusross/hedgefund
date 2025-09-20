@@ -7,14 +7,12 @@ namespace App\Domain\Decision\DTO;
 final readonly class IgRulesSnapshot
 {
     /**
-     * @param array<string, mixed> $rules
+     * @param  array<string, mixed>  $rules
      */
-    public function __construct(private array $rules)
-    {
-    }
+    public function __construct(private array $rules) {}
 
     /**
-     * @param array<string, mixed> $rules
+     * @param  array<string, mixed>  $rules
      */
     public static function fromArray(array $rules): self
     {

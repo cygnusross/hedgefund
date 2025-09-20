@@ -10,11 +10,10 @@ final readonly class MetaSnapshot
         private string $pairNorm,
         private ?int $dataAgeSec,
         private float $sleeveBalance,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $meta
+     * @param  array<string, mixed>  $meta
      */
     public static function fromArray(array $meta): self
     {
@@ -40,4 +39,3 @@ final readonly class MetaSnapshot
         return $this->sleeveBalance;
     }
 }
-

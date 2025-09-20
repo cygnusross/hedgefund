@@ -23,8 +23,9 @@ class IgPriceProvider implements PriceProvider
     public function getCandles(string $symbol, array $params = []): array
     {
         try {
+            $marketModel = $this->findMarket($symbol);
             // Attempt to resolve epic from stored Market metadata first (preferred)
-            $epic = $this->resolveEpic($symbol);
+            $epic = $marketModel?->epic ?? $this->resolveEpicFromSymbol($symbol);
 
             // Get resolution from params or use default
             $interval = $params['interval'] ?? '5min';
@@ -41,6 +42,7 @@ class IgPriceProvider implements PriceProvider
 
             // Convert to Bar objects
             $bars = $historicalPricesResponse->toBars();
+            $bars = $this->maybeNormalizeBars($symbol, $bars, $marketModel);
 
             // Sort oldest to newest (IG typically returns newest first)
             usort($bars, fn (Bar $a, Bar $b) => $a->ts <=> $b->ts);
@@ -51,6 +53,7 @@ class IgPriceProvider implements PriceProvider
                 'num_points' => $numPoints,
                 'bars_count' => count($bars),
                 'allowance_remaining' => $historicalPricesResponse->allowance->remainingAllowance,
+                'price_scale' => $marketModel?->price_scale,
             ]);
 
             return $bars;
@@ -73,14 +76,8 @@ class IgPriceProvider implements PriceProvider
      * GBP/USD -> CS.D.GBPUSD.MINI.IP
      * USD/JPY -> CS.D.USDJPY.MINI.IP
      */
-    protected function resolveEpic(string $symbol): string
+    protected function resolveEpicFromSymbol(string $symbol): string
     {
-        $normalized = strtoupper(str_replace(' ', '', $symbol));
-        $market = Market::where('symbol', $symbol)->orWhere('symbol', $normalized)->orWhere('name', $symbol)->first();
-        if ($market && $market->epic) {
-            return $market->epic;
-        }
-
         // Handle forex pairs
         if (str_contains($symbol, '/')) {
             $pair = str_replace('/', '', $symbol);
@@ -95,6 +92,81 @@ class IgPriceProvider implements PriceProvider
 
         // Default forex TODAY epic format
         return "CS.D.{$symbol}.TODAY.IP";
+    }
+
+    protected function findMarket(string $symbol): ?Market
+    {
+        $query = Market::query();
+        $query->where('symbol', $symbol)
+            ->orWhere('name', $symbol);
+
+        $upper = strtoupper($symbol);
+        $query->orWhere('symbol', $upper);
+
+        $normalized = strtoupper(str_replace(' ', '', $symbol));
+        if (strlen($normalized) >= 6 && ! str_contains($normalized, '/')) {
+            $normalized = substr($normalized, 0, 3).'/'.substr($normalized, 3, 3);
+        }
+
+        $dashVariant = str_replace('/', '-', $normalized);
+
+        $query->orWhere('symbol', $normalized)
+            ->orWhere('symbol', $dashVariant);
+
+        return $query->first();
+    }
+
+    /**
+     * Normalize IG price data when raw values are expressed in points instead of decimals.
+     *
+     * @param  Bar[]  $bars
+     * @return Bar[]
+     */
+    protected function maybeNormalizeBars(string $symbol, array $bars, ?Market $market): array
+    {
+        if (empty($bars)) {
+            return $bars;
+        }
+
+        $priceScale = $market?->price_scale;
+        if (! is_numeric($priceScale) || (float) $priceScale <= 1.0) {
+            return $bars;
+        }
+
+        $maxMagnitude = 0.0;
+        foreach ($bars as $bar) {
+            $maxMagnitude = max(
+                $maxMagnitude,
+                abs($bar->open),
+                abs($bar->high),
+                abs($bar->low),
+                abs($bar->close)
+            );
+        }
+
+        // IG historical prices for FX mini contracts often arrive in raw points (>= 1000)
+        if ($maxMagnitude < 1000) {
+            return $bars;
+        }
+
+        $scale = (float) $priceScale;
+
+        Log::info('ig_price_provider_scaling_applied', [
+            'symbol' => $symbol,
+            'price_scale' => $scale,
+            'max_raw_price' => $maxMagnitude,
+        ]);
+
+        return array_map(function (Bar $bar) use ($scale) {
+            return new Bar(
+                $bar->ts,
+                $bar->open / $scale,
+                $bar->high / $scale,
+                $bar->low / $scale,
+                $bar->close / $scale,
+                $bar->volume
+            );
+        }, $bars);
     }
 
     /**

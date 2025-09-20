@@ -9,9 +9,8 @@ it('prints JSON and returns non-zero when strict and hold', function () {
     // Fake ContextBuilder to return deterministic context
     $fakeCtx = [
         'meta' => ['pair_norm' => 'EUR-USD', 'data_age_sec' => 10],
-        'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1000, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5, 'sentiment' => ['long_pct' => 50, 'short_pct' => 50]],
+        'market' => ['status' => 'CLOSED', 'last_price' => 1.1000, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5, 'sentiment' => ['long_pct' => 50, 'short_pct' => 50]],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.0, 'direction' => 'neutral'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -24,7 +23,7 @@ it('prints JSON and returns non-zero when strict and hold', function () {
             $this->ctx = $ctx;
         }
 
-        public function build(string $pair, \DateTimeImmutable $ts, mixed $newsDateOrDays = null, bool $fresh = false, bool $forceSpread = false, array $opts = []): ?array
+        public function build(string $pair, \DateTimeImmutable $ts, bool $fresh = false, bool $forceSpread = false, array $opts = [], ?string $accountName = null): ?array
         {
             return $this->ctx;
         }

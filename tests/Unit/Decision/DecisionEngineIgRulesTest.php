@@ -2,17 +2,13 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Rules\AlphaRules;
 
 it('enforces ig minNormalStopOrLimitDistance by pushing sl/tp outward', function () {
     $yaml = <<<'YAML'
-    gates:
-      news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.45
+    gates: {}
     confluence:
       require_trend_alignment_for_moderate: true
       allow_strong_against_trend: false
@@ -46,7 +42,6 @@ it('enforces ig minNormalStopOrLimitDistance by pushing sl/tp outward', function
             'ig_rules' => ['minNormalStopOrLimitDistance' => 20], // 20 points = 20 * 0.0001 = 0.0020
         ],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 

@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Domain\Execution;
 
 use App\Domain\FX\PipMath;
+use App\Models\Market;
 use App\Support\Math\Decimal;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
-use App\Models\Market;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 

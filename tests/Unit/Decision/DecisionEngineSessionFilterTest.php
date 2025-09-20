@@ -9,15 +9,9 @@ it('applies confidence reduction during avoided Asian session', function () {
     // Create rules YAML with session filtering
     $rulesYaml = <<<'YAML'
 schema_version: "1.1"
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.32
-        strong: 0.50
+gates: {}
 confluence: {}
-risk:
-    default: 0.009
-    strong_news: 0.018
+risk: {}
 execution: {}
 cooldowns: {}
 overrides: {}
@@ -45,7 +39,6 @@ YAML;
             'sentiment' => ['long_pct' => 60.0, 'short_pct' => 40.0],
         ],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -69,15 +62,9 @@ it('applies normal confidence during London session', function () {
     // Create rules YAML with session filtering
     $rulesYaml = <<<'YAML'
 schema_version: "1.1"
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.32
-        strong: 0.50
+gates: {}
 confluence: {}
-risk:
-    default: 0.009
-    strong_news: 0.018
+risk: {}
 execution: {}
 cooldowns: {}
 overrides: {}
@@ -114,15 +101,9 @@ it('applies normal confidence when no session filters configured', function () {
     // Create rules YAML without session filtering
     $rulesYaml = <<<'YAML'
 schema_version: "1.1"
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.32
-        strong: 0.50
+gates: {}
 confluence: {}
-risk:
-    default: 0.009
-    strong_news: 0.018
+risk: {}
 execution: {}
 cooldowns: {}
 overrides: {}
@@ -152,15 +133,9 @@ it('applies confidence boost during preferred sessions', function () {
     // Create rules YAML with preferred session filtering
     $rulesYaml = <<<'YAML'
 schema_version: "1.1"
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.32
-        strong: 0.50
+gates: {}
 confluence: {}
-risk:
-    default: 0.009
-    strong_news: 0.018
+risk: {}
 execution: {}
 cooldowns: {}
 overrides: {}

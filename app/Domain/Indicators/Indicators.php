@@ -4,14 +4,14 @@ namespace App\Domain\Indicators;
 
 use App\Domain\Market\Bar;
 use Ds\Vector;
-use MathPHP\Statistics\Average;
-use MathPHP\Statistics\Descriptive;
-use MathPHP\Statistics\Regression\Linear;
 use MathPHP\Exception\BadDataException;
-use MathPHP\Exception\OutOfBoundsException;
 use MathPHP\Exception\IncorrectTypeException;
 use MathPHP\Exception\MathException;
 use MathPHP\Exception\MatrixException;
+use MathPHP\Exception\OutOfBoundsException;
+use MathPHP\Statistics\Average;
+use MathPHP\Statistics\Descriptive;
+use MathPHP\Statistics\Regression\Linear;
 
 final class Indicators
 {
@@ -104,7 +104,7 @@ final class Indicators
         try {
             $mean = Average::mean($closes);
             $stdev = Descriptive::standardDeviation($closes);
-        } catch (BadDataException | OutOfBoundsException $e) {
+        } catch (BadDataException|OutOfBoundsException $e) {
             return null;
         }
 
@@ -189,7 +189,7 @@ final class Indicators
             $regression = new Linear($points);
             $parameters = $regression->getParameters();
             $slope = $parameters['m'];
-        } catch (BadDataException | IncorrectTypeException | MatrixException | MathException $e) {
+        } catch (BadDataException|IncorrectTypeException|MatrixException|MathException $e) {
             return 'sideways';
         }
 
@@ -233,7 +233,6 @@ final class Indicators
         return $adx === false ? null : (float) $adx;
     }
 
-
     /**
      * Simple pivot-based swing support/resistance detection.
      *
@@ -248,8 +247,8 @@ final class Indicators
         }
 
         $start = max(0, $count - $lookback);
-        $supports = new Vector();
-        $resistances = new Vector();
+        $supports = new Vector;
+        $resistances = new Vector;
 
         // scan from newest to oldest to get most recent pivots first
         for ($i = $count - 1; $i >= $start; $i--) {
@@ -376,7 +375,6 @@ final class Indicators
         ];
     }
 
-
     /**
      * Bollinger Bands indicator.
      *
@@ -422,7 +420,6 @@ final class Indicators
             'lower' => (float) $lower,
         ];
     }
-
 
     /**
      * Stochastic Oscillator %K and %D.

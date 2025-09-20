@@ -6,12 +6,10 @@ namespace App\Domain\Decision\DTO;
 
 final readonly class CalendarSnapshot
 {
-    public function __construct(private bool $withinBlackout)
-    {
-    }
+    public function __construct(private bool $withinBlackout) {}
 
     /**
-     * @param array<string, mixed> $calendar
+     * @param  array<string, mixed>  $calendar
      */
     public static function fromArray(array $calendar): self
     {
@@ -23,4 +21,3 @@ final readonly class CalendarSnapshot
         return $this->withinBlackout;
     }
 }
-

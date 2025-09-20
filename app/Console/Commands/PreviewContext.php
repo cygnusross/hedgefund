@@ -38,7 +38,7 @@ final class PreviewContext extends Command
         $contextBuilder = app(ContextBuilder::class);
 
         // Use false for $fresh to avoid forcing candle refresh
-        $ctx = $contextBuilder->build($pair, $ts, null, false, $forceSpread, ['force_sentiment' => $forceSentiment]);
+        $ctx = $contextBuilder->build($pair, $ts, false, $forceSpread, ['force_sentiment' => $forceSentiment]);
 
         if ($ctx === null) {
             $this->line('Not enough warm-up.');
@@ -46,7 +46,7 @@ final class PreviewContext extends Command
             return 0;
         }
 
-        // $ctx is already the merged payload (features + news + calendar + blackout)
+        // $ctx is already the merged payload (features + sentiment + calendar + blackout)
         $this->line(json_encode($ctx, JSON_PRETTY_PRINT));
 
         return 0;

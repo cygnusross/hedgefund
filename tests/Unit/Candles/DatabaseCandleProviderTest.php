@@ -9,7 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(Tests\TestCase::class, RefreshDatabase::class);
 
 it('returns database candles in chronological order', function () {
-    $provider = new DatabaseCandleProvider();
+    $provider = new DatabaseCandleProvider;
 
     $now = now('UTC')->setSeconds(0);
 

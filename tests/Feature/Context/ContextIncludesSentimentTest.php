@@ -40,15 +40,6 @@ it('includes sentiment in the market context when provider returns data', functi
             return $bars;
         }
     };
-    $newsProvider = new class implements \App\Services\News\NewsProvider
-    {
-        public function fetchStat(string $pair, string $date = 'today', bool $fresh = false): array
-        {
-            return ['pair' => strtoupper(str_replace('/', '-', $pair)), 'date' => $date, 'pos' => 0, 'neg' => 0, 'neu' => 0, 'score' => 0.0];
-        }
-    };
-
-    $news = new \App\Application\News\NewsAggregator($newsProvider);
 
     $calendarProvider = new class implements \App\Services\Economic\EconomicCalendarProviderContract
     {

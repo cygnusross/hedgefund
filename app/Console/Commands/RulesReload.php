@@ -28,7 +28,6 @@ final class RulesReload extends Command
         // alpha rules reloaded; metadata printed to console when requested
 
         if ($this->option('show')) {
-            $this->line('gates.news_threshold: '.json_encode($rules->get('gates.news_threshold')));
             $this->line('gates.adx_min: '.json_encode($rules->get('gates.adx_min')));
             $this->line('risk.per_trade_pct: '.json_encode($rules->get('risk.per_trade_pct')));
             $this->line('risk.per_trade_cap_pct: '.json_encode($rules->get('risk.per_trade_cap_pct')));

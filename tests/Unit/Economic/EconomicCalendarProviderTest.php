@@ -11,9 +11,9 @@ it('fetches and normalizes the economic calendar and caches results', function (
 
     $sample = [
         [
-            'title' => 'Test Event',
+            'title' => 'Sample Event',
             'country' => 'USD',
-            'date' => '2025-09-12T10:00:00-04:00',
+            'date' => '2025-09-12T10:00:00-04:00', // Valid date
             'impact' => 'High',
         ],
     ];

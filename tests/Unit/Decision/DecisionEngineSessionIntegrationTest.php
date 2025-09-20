@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Rules\AlphaRules;
 
 // Override the current time for testing
@@ -16,15 +16,9 @@ it('blocks trading decision during Asian session via session filtering', functio
     // Create rules YAML with Phase 1 improvements including session filtering
     $rulesYaml = <<<'YAML'
 schema_version: "1.1"
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.32
-        strong: 0.50
+gates: {}
 confluence: {}
-risk:
-    default: 0.009
-    strong_news: 0.018
+risk: {}
 execution: {}
 cooldowns: {}
 overrides: {}
@@ -56,7 +50,6 @@ YAML;
             'adx5m' => 30.0, // Strong trend
             'ema20_z' => 0.5, // Not stretched
         ],
-        'news' => ['strength' => 0.6, 'direction' => 'buy'], // Strong news signal
         'calendar' => ['within_blackout' => false], // Not in blackout
     ];
 
@@ -81,15 +74,9 @@ it('allows trading during optimal session when all other conditions are met', fu
     // Create test context similar to existing successful decision tests
     $rulesYaml = <<<'YAML'
 schema_version: "1.1"
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.32
-        strong: 0.50
+gates: {}
 confluence: {}
-risk:
-    default: 0.009
-    strong_news: 0.018
+risk: {}
 execution: {}
 cooldowns: {}
 overrides: {}
@@ -122,7 +109,6 @@ YAML;
             'adx5m' => 30.0,
             'ema20_z' => 0.5,
         ],
-        'news' => ['strength' => 0.6, 'direction' => 'buy'], // Strong signal
         'calendar' => ['within_blackout' => false],
     ];
 

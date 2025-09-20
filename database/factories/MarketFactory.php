@@ -28,13 +28,33 @@ class MarketFactory extends Factory
 
         $pair = fake()->randomElement($currencies);
         $symbol = implode('/', $pair);
-        $epic = 'CS.D.'.implode('', $pair).'.TODAY.IP';
+
+        // Allow symbol override to determine epic deterministically
+        // epic should be deterministically derived from the final symbol
+        $epicClosure = function (array $attributes) use ($symbol) {
+            $sym = $attributes['symbol'] ?? $symbol;
+            $parts = explode('/', $sym);
+            $joined = implode('', $parts);
+
+            return 'CS.D.'.$joined.'.TODAY.IP';
+        };
 
         return [
-            'name' => $symbol,
-            'symbol' => $symbol,
-            'epic' => $epic,
-            'currencies' => $pair,
+            'symbol' => function (array $attributes) use ($symbol) {
+                return $attributes['symbol'] ?? $symbol;
+            },
+            'name' => function (array $attributes) use ($symbol) {
+                return $attributes['symbol'] ?? $symbol;
+            },
+            'epic' => function (array $attributes) use ($epicClosure) {
+                return $epicClosure($attributes);
+            },
+            'currencies' => function (array $attributes) use ($symbol) {
+                $sym = $attributes['symbol'] ?? $symbol;
+                $parts = explode('/', $sym);
+
+                return $parts;
+            },
             'is_active' => true,
         ];
     }

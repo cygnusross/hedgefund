@@ -2,18 +2,14 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Rules\AlphaRules;
 
-it('when allowed includes news_label and trade fields; when blocked sets blocked=true', function () {
+it('when allowed includes trade fields; when blocked sets blocked=true', function () {
     // Build rules that allow a buy
     $yaml = <<<'YAML'
-gates:
-  news_threshold:
-    deadband: 0.1
-    moderate: 0.3
-    strong: 0.45
+gates: {}
 confluence: {}
 risk:
   per_trade_pct:
@@ -35,16 +31,14 @@ YAML;
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 1, 'sleeve_balance' => 10000.0],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5, 'ig_rules' => ['pip_value' => 1.0, 'size_step' => 0.01]],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 
     $engine = new LiveDecisionEngine($rules);
     $resAllowed = $engine->decide(DecisionRequest::fromArray($ctxAllowed))->toArray();
 
-    // When allowed, expect action != 'hold' and presence of news_label and trade fields
+    // When allowed, expect action != 'hold' and presence of trade fields
     expect($resAllowed['action'])->not->toBe('hold');
-    expect(array_key_exists('news_label', $resAllowed))->toBeTrue();
     expect(array_key_exists('risk_pct', $resAllowed))->toBeTrue();
     expect(array_key_exists('entry', $resAllowed))->toBeTrue();
     expect(array_key_exists('sl', $resAllowed))->toBeTrue();

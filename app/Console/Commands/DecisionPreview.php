@@ -10,14 +10,13 @@ use Illuminate\Console\Command;
 
 class DecisionPreview extends Command
 {
-    protected $signature = 'decision:preview {pair} {--force-calendar} {--force-sentiment} {--strict} {--account= : Account name to use for position sizing}';
+    protected $signature = 'decision:preview {pair} {--force-sentiment} {--strict} {--account= : Account name to use for position sizing}';
 
     protected $description = 'Preview LiveDecisionEngine output for a given pair';
 
     public function handle(): int
     {
         $pair = $this->argument('pair');
-        $forceCalendar = $this->option('force-calendar');
         $forceSentiment = $this->option('force-sentiment');
         $accountName = $this->option('account');
 
@@ -28,11 +27,8 @@ class DecisionPreview extends Command
         $engine = app(LiveDecisionEngineContract::class);
 
         // Build context; pass force options via $opts
-        $opts = [
-            'force_calendar' => (bool) $forceCalendar,
-            'force_sentiment' => (bool) $forceSentiment,
-        ];
-        $ctx = $builder->build($pair, $now, null, false, false, $opts, $accountName);
+        $opts = ['force_sentiment' => (bool) $forceSentiment];
+        $ctx = $builder->build($pair, $now, false, false, $opts, $accountName);
 
         if ($ctx === null) {
             $this->error('could not build context');

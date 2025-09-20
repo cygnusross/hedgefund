@@ -21,6 +21,7 @@ return new class extends Migration
             $table->decimal('low', 10, 5); // Lowest price
             $table->decimal('close', 10, 5); // Closing price
             $table->bigInteger('volume')->nullable(); // Trading volume
+            $table->string('provider', 50)->nullable(); // Data provider (twelvedata, ig, etc)
             $table->timestamps();
 
             // Composite unique index for idempotency

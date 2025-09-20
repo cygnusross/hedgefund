@@ -1,8 +1,4 @@
 gates:
-  news_threshold:
-    strong: 90
-    moderate: 70
-    deadband: 50
   sentiment:
     mode: contrarian
 confluence: {}

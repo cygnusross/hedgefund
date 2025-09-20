@@ -9,7 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(Tests\TestCase::class, RefreshDatabase::class);
 
 it('returns calendar events from database', function () {
-    $provider = new DatabaseEconomicCalendarProvider();
+    $provider = new DatabaseEconomicCalendarProvider;
 
     CalendarEvent::factory()->create([
         'currency' => 'USD',

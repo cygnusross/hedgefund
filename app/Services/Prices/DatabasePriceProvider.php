@@ -6,9 +6,7 @@ use App\Application\Candles\DatabaseCandleProvider;
 
 class DatabasePriceProvider implements PriceProvider
 {
-    public function __construct(private DatabaseCandleProvider $provider)
-    {
-    }
+    public function __construct(private DatabaseCandleProvider $provider) {}
 
     public function getCandles(string $symbol, array $params = []): array
     {

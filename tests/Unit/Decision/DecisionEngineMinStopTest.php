@@ -2,17 +2,13 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Rules\AlphaRules;
 
 it('enforces minimum stop loss for margin safety', function () {
     $rulesYaml = <<<'YAML'
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.45
+gates: {}
 confluence: {}
 risk:
     per_trade_pct:
@@ -39,7 +35,6 @@ YAML;
             'spread_estimate_pips' => 0.5,
         ],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -60,11 +55,7 @@ YAML;
 
 it('allows ATR-based stop when it exceeds minimum', function () {
     $rulesYaml = <<<'YAML'
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.45
+gates: {}
 confluence: {}
 risk:
     per_trade_pct:
@@ -91,7 +82,6 @@ YAML;
             'spread_estimate_pips' => 0.5,
         ],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -112,11 +102,7 @@ YAML;
 
 it('works with different minimum stop loss values', function () {
     $rulesYaml = <<<'YAML'
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.45
+gates: {}
 confluence: {}
 risk:
     per_trade_pct:
@@ -142,7 +128,6 @@ YAML;
             'spread_estimate_pips' => 0.5,
         ],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 

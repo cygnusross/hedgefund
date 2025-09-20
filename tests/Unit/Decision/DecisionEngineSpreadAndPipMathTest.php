@@ -2,17 +2,13 @@
 
 declare(strict_types=1);
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Rules\AlphaRules;
 
 it('holds when spread exceeds configured ceiling', function () {
     $yaml = <<<'YAML'
-    gates:
-      news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.5
+    gates: {}
     confluence:
       require_trend_alignment_for_moderate: true
       allow_strong_against_trend: false
@@ -43,7 +39,6 @@ it('holds when spread exceeds configured ceiling', function () {
             'sentiment' => ['long_pct' => 50.0, 'short_pct' => 50.0],
         ],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.35, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -58,11 +53,7 @@ it('holds when spread exceeds configured ceiling', function () {
 
 it('computes sl/tp deltas correctly for JPY vs non-JPY pairs', function () {
     $yaml = <<<'YAML'
-    gates:
-      news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.45
+    gates: {}
     confluence:
       require_trend_alignment_for_moderate: true
       allow_strong_against_trend: false
@@ -94,7 +85,6 @@ it('computes sl/tp deltas correctly for JPY vs non-JPY pairs', function () {
             'sentiment' => ['long_pct' => 60.0, 'short_pct' => 40.0],
         ],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 
@@ -103,18 +93,6 @@ it('computes sl/tp deltas correctly for JPY vs non-JPY pairs', function () {
 
     // ATR=10 pips, sl_mult=2 => slPips=20 => delta = 20 * 0.0001 = 0.0020
     expect($res1['action'])->toBe('buy');
-    // Derive expected label from thresholds to avoid hard-coded mismatch
-    $modThreshold = $rules->getGate('news_threshold.moderate');
-    $strongThreshold = $rules->getGate('news_threshold.strong');
-    $strength = $ctx1['news']['strength'];
-    $expectedLabel = 'weak';
-    if ($strength >= $strongThreshold) {
-        $expectedLabel = 'strong';
-    } elseif ($strength >= $modThreshold) {
-        $expectedLabel = 'moderate';
-    }
-
-    expect($res1['news_label'])->toBe($expectedLabel);
     $diff1 = abs($res1['entry'] - $res1['sl']);
     expect(abs($diff1 - 0.0020))->toBeLessThan(0.00001);
 

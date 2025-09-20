@@ -2,9 +2,7 @@
 
 namespace App\Application\Candles;
 
-use App\Domain\Market\Bar;
 use App\Models\Candle;
-use Illuminate\Support\Collection;
 
 final class DatabaseCandleProvider implements CandleUpdaterContract
 {

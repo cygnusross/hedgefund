@@ -6,21 +6,25 @@ use App\Application\Calendar\CalendarLookup;
 use App\Application\Candles\CandleUpdaterContract;
 use App\Domain\Decision\DecisionContext;
 use App\Domain\Decision\DTO\DecisionMetadata;
+use App\Domain\Decision\DTO\RulesSnapshot;
 use App\Domain\Features\FeatureEngine;
-use App\Domain\FX\PipMath;
-use App\Support\Math\Decimal;
-use Brick\Math\RoundingMode;
 use App\Domain\FX\Contracts\SpreadEstimatorContract;
+use App\Domain\FX\PipMath;
 use App\Domain\Market\Contracts\MarketStatusProvider;
+use App\Domain\Rules\RuleContextManager;
+use App\Domain\Sentiment\Contracts\SentimentProvider;
 use App\Models\Account;
 use App\Models\Market;
-use App\Domain\Sentiment\Contracts\SentimentProvider;
 use App\Services\IG\Endpoints\MarketsEndpoint;
+use App\Support\Math\Decimal;
+use Brick\Math\RoundingMode;
 // Use fully-qualified DateTime classes to avoid non-compound use statement warnings
 use Illuminate\Support\Facades\Log;
 
 class ContextBuilder
 {
+    private RuleContextManager $ruleContextManager;
+
     /**
      * Return true when the provided UTC datetime falls on Saturday or Sunday.
      */
@@ -44,8 +48,11 @@ class ContextBuilder
         public ?SpreadEstimatorContract $spreadEstimator = null,
         public ?SentimentProvider $sentimentProvider = null,
         public ?MarketsEndpoint $markets = null,
-        public ?MarketStatusProvider $marketStatusProvider = null
-    ) {}
+        public ?MarketStatusProvider $marketStatusProvider = null,
+        ?RuleContextManager $ruleContextManager = null,
+    ) {
+        $this->ruleContextManager = $ruleContextManager ?? app(RuleContextManager::class);
+    }
 
     /**
      * Fetch and prepare market bar data for the given pair and timestamp.
@@ -74,63 +81,6 @@ class ContextBuilder
         $bars30 = array_values(array_filter($bars30, fn ($b) => $b->ts <= $ts));
 
         return ['bars5' => $bars5, 'bars30' => $bars30];
-    }
-
-    /**
-     * Rebuild news data from database and update cache.
-     */
-    private function rebuildNewsFromDatabase(string $pair, string $statDate, string $cacheKey): array
-    {
-        $pairNorm = strtoupper(str_replace(['/', ' '], '-', $pair));
-        $newsStat = \App\Models\NewsStat::where('pair_norm', $pairNorm)
-            ->whereDate('stat_date', $statDate)
-            ->first();
-
-        if ($newsStat) {
-            // Read data from payload if available, otherwise from model fields
-            $newsData = $newsStat->payload ?: [];
-
-            // Get raw_score from payload or model field
-            $rawScore = (float) ($newsData['raw_score'] ?? $newsStat->raw_score ?? 0.0);
-
-            // Get strength from payload or model field
-            $strength = (float) ($newsData['strength'] ?? $newsStat->strength ?? 0.0);
-
-            // Get counts from payload or build from model fields
-            $counts = $newsData['counts'] ?? [
-                'pos' => $newsStat->pos ?? 0,
-                'neg' => $newsStat->neg ?? 0,
-                'neu' => $newsStat->neu ?? 0,
-            ];
-
-            // Rebuild cache from combined data
-            $cacheData = [
-                'raw_score' => $rawScore,
-                'strength' => $strength,
-                'counts' => $counts,
-            ];
-            $ttl = NewsCacheKeyStrategy::getTtl($statDate);
-            $this->putInCache($cacheKey, $cacheData, $ttl);
-
-            $direction = $rawScore > 0 ? 'buy' : ($rawScore < 0 ? 'sell' : 'neutral');
-
-            return [
-                'direction' => $direction,
-                'strength' => $strength,
-                'counts' => $counts,
-                'raw_score' => $rawScore,
-                'date' => $statDate,
-            ];
-        }
-
-        // No cached data or database record available - use neutral defaults
-        return [
-            'direction' => 'neutral',
-            'strength' => 0.0,
-            'counts' => ['pos' => 0, 'neg' => 0, 'neu' => 0],
-            'raw_score' => 0.0,
-            'date' => $statDate,
-        ];
     }
 
     /**
@@ -470,7 +420,7 @@ class ContextBuilder
      */
     // Add $forceSpread to allow callers (like CLI) to bypass estimator cache when requested.
     // Add $accountName to allow selecting which account/sleeve to use for position sizing
-    public function build(string $pair, \DateTimeImmutable $ts, mixed $newsDateOrDays = null, bool $fresh = false, bool $forceSpread = false, array $opts = [], ?string $accountName = null): ?array
+    public function build(string $pair, \DateTimeImmutable $ts, bool $fresh = false, bool $forceSpread = false, array $opts = [], ?string $accountName = null): ?array
     {
         $marketBars = $this->getMarketBars($pair, $ts);
         $bars5 = $marketBars['bars5'];
@@ -514,6 +464,28 @@ class ContextBuilder
         $maxDataAge = $marketMetadata['maxDataAge'];
         $maxQuoteAge = $marketMetadata['maxQuoteAge'];
 
+        $rulesSnapshot = null;
+        try {
+            $ruleContext = $this->ruleContextManager->current();
+            if ($ruleContext !== null) {
+                $layeredRules = $ruleContext->forMarket($pair);
+                $rulesSnapshot = RulesSnapshot::fromArray([
+                    'layered' => $layeredRules,
+                    'tag' => $ruleContext->tag,
+                    'metadata' => $ruleContext->metadata,
+                ]);
+
+                if ($ruleContext->tag !== null) {
+                    $marketMeta['rule_set_tag'] = $ruleContext->tag;
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('contextbuilder_rules_snapshot_failed', [
+                'pair' => $pair,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         // Remove blackout duplication from calendar payload if provider added it
         if (is_array($cal) && isset($cal['blackout_minutes_high'])) {
             unset($cal['blackout_minutes_high']);
@@ -538,8 +510,8 @@ class ContextBuilder
                 'sleeve_balance' => $sleeveBalance,
                 'account_name' => $account?->name,
                 'account_id' => $account?->id,
-            ])
-        );
+                'rule_set_tag' => $rulesSnapshot?->tag(),
+            ]), $rulesSnapshot);
 
         // Build payload by merging ctx->toArray() with calendar/blackout metadata
         $payload = $ctx->toArray();
@@ -557,4 +529,22 @@ class ContextBuilder
     }
 
     // ATR-to-pips conversion is centralized in App\Domain\FX\PipMath
+
+    private function getFromCache(string $key)
+    {
+        try {
+            return \Illuminate\Support\Facades\Cache::get($key);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function putInCache(string $key, $value, int $ttl): void
+    {
+        try {
+            \Illuminate\Support\Facades\Cache::put($key, $value, $ttl);
+        } catch (\Throwable $e) {
+            // ignore cache write failures
+        }
+    }
 }

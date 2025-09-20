@@ -8,9 +8,9 @@ use App\Domain\FX\PipMath;
 use App\Domain\Indicators\Indicators;
 use App\Domain\Market\Bar;
 use App\Domain\Market\FeatureSet;
-use Ds\Vector;
 use App\Support\Math\Decimal;
 use Brick\Math\RoundingMode;
+use Ds\Vector;
 
 // Use fully-qualified DateTime classes to avoid non-compound use statement warnings
 
@@ -96,8 +96,8 @@ final class FeatureEngine
         $lastPrice = $lastBar ? $lastBar->close : null;
 
         // Split and order supports/resistances relative to last price
-        $supports = new Vector();
-        $resists = new Vector();
+        $supports = new Vector;
+        $resists = new Vector;
         if (is_numeric($lastPrice)) {
             foreach ($rawSupports as $s) {
                 if ($s < $lastPrice) {

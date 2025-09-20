@@ -21,14 +21,6 @@ it('returns null until warm_up', function () {
         }
     };
 
-    $news = new class implements \App\Services\News\NewsProvider
-    {
-        public function fetchStat(string $pair, string $date = 'today', bool $fresh = false): array
-        {
-            return ['pair' => str_replace('/', '-', strtoupper($pair)), 'date' => $date, 'pos' => 0, 'neg' => 0, 'neu' => 0, 'score' => 0.0];
-        }
-    };
-
     $calendarProvider = new class implements \App\Services\Economic\EconomicCalendarProviderContract
     {
         public function getCalendar(bool $force = false): array
@@ -44,11 +36,11 @@ it('returns null until warm_up', function () {
 
     $builder = new ContextBuilder($updater, new CalendarLookup($calendarProvider));
 
-    $res = $builder->build('EUR/USD', $now, 'today');
+    $res = $builder->build('EUR/USD', $now);
     expect($res)->toBeNull();
 });
 
-it('returns features news calendar and blackout true for near event', function () {
+it('returns features calendar and blackout true for near event', function () {
     $now = new \DateTimeImmutable('2025-01-01 00:00:00', new \DateTimeZone('UTC'));
 
     // Build deterministic bars for 5m and 30m with enough history
@@ -71,15 +63,6 @@ it('returns features news calendar and blackout true for near event', function (
         public function sync(string $symbol, string $interval, int $limit, int $overlapBars = 2, int $tailFetchLimit = 200): array
         {
             return $interval === '5min' ? $this->b5 : $this->b30;
-        }
-    };
-
-    // Fake news provider returning aggregated stats
-    $newsProvider = new class implements \App\Services\News\NewsProvider
-    {
-        public function fetchStat(string $pair, string $date = 'today', bool $fresh = false): array
-        {
-            return ['pair' => str_replace('/', '-', strtoupper($pair)), 'date' => $date, 'pos' => 2, 'neg' => 1, 'neu' => 0, 'score' => 0.33];
         }
     };
 
@@ -114,8 +97,6 @@ it('returns features news calendar and blackout true for near event', function (
     expect($res['features'])->toHaveKey('ema20');
     expect($res['features'])->toHaveKey('atr5m');
     expect($res['features'])->toHaveKey('adx5m');
-    expect(in_array($res['news']['direction'], ['buy', 'sell', 'neutral']))->toBeTrue();
-    expect($res['news']['strength'])->toBeBetween(0.0, 1.0);
     expect($res['calendar']['next_high']['minutes_to'])->toBe(45);
     expect($res['calendar']['within_blackout'])->toBeTrue();
     // New provenance/meta fields
@@ -128,10 +109,6 @@ it('returns features news calendar and blackout true for near event', function (
     expect($res['meta']['pair_norm'])->toBe('EUR-USD');
     // calendar should not duplicate the blackout window
     expect(isset($res['calendar']['blackout_minutes_high']))->toBeFalse();
-    // News raw provenance - now uses cache-only approach, defaults to neutral when no cache
-    expect($res['news']['raw_score'])->toBe(0.0);
-    $expectedDate = $now->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d');
-    expect($res['news']['date'])->toBe($expectedDate);
     // Market extras (promoted to top-level)
     expect($res)->toHaveKey('market');
     expect($res['market']['last_price'])->toBe($bars5[count($bars5) - 1]->close);
@@ -162,14 +139,6 @@ it('blackout false when event > 60min', function () {
         public function sync(string $symbol, string $interval, int $limit, int $overlapBars = 2, int $tailFetchLimit = 200): array
         {
             return $interval === '5min' ? $this->b5 : $this->b30;
-        }
-    };
-
-    $newsProvider = new class implements \App\Services\News\NewsProvider
-    {
-        public function fetchStat(string $pair, string $date = 'today', bool $fresh = false): array
-        {
-            return ['pair' => str_replace('/', '-', strtoupper($pair)), 'date' => $date, 'pos' => 0, 'neg' => 0, 'neu' => 0, 'score' => 0.0];
         }
     };
 

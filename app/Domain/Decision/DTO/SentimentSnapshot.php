@@ -9,11 +9,10 @@ final readonly class SentimentSnapshot
     public function __construct(
         private ?float $longPct,
         private ?float $shortPct,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $sentiment
+     * @param  array<string, mixed>  $sentiment
      */
     public static function fromArray(array $sentiment): self
     {
@@ -33,4 +32,3 @@ final readonly class SentimentSnapshot
         return $this->shortPct;
     }
 }
-

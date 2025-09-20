@@ -9,7 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(Tests\TestCase::class, RefreshDatabase::class);
 
 it('returns latest recorded spread from database', function () {
-    $estimator = new DatabaseSpreadEstimator();
+    $estimator = new DatabaseSpreadEstimator;
 
     Spread::create([
         'pair' => 'NZD/USD',
@@ -30,7 +30,7 @@ it('returns latest recorded spread from database', function () {
 });
 
 it('returns null when no spread data available', function () {
-    $estimator = new DatabaseSpreadEstimator();
+    $estimator = new DatabaseSpreadEstimator;
 
     expect($estimator->estimatePipsForPair('EUR/USD'))->toBeNull();
     expect($estimator->getMarketStatusForPair('EUR/USD'))->toBeNull();

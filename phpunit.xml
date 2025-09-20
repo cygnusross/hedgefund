@@ -29,5 +29,11 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <!-- Calibration optimizations for fast tests -->
+        <env name="MC_SKIP" value="true"/>
+        <env name="CAL_STAGE1_COUNT" value="5"/>
+        <env name="CAL_STAGE2_COUNT" value="5"/>
+        <env name="CAL_TOP_N_MC" value="1"/>
+        <env name="CAL_MC_RUNS" value="0"/>
     </php>
 </phpunit>

@@ -9,7 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(Tests\TestCase::class, RefreshDatabase::class);
 
 it('returns sentiment from database by market id', function () {
-    $provider = new DatabaseSentimentProvider();
+    $provider = new DatabaseSentimentProvider;
 
     ClientSentiment::create([
         'market_id' => 'CS.D.NZDUSD.TODAY.IP',
@@ -28,7 +28,7 @@ it('returns sentiment from database by market id', function () {
 });
 
 it('returns null when no sentiment available', function () {
-    $provider = new DatabaseSentimentProvider();
+    $provider = new DatabaseSentimentProvider;
 
     expect($provider->fetch('UNKNOWN'))->toBeNull();
 });

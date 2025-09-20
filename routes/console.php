@@ -49,6 +49,12 @@ if (isset($schedule)) {
         ->weekdays()
         ->between('07:00', '22:00')
         ->timezone('Europe/London');
+
+    $schedule->command('rules:calibrate')
+        ->sundays()
+        ->at('22:00')
+        ->timezone('Europe/London')
+        ->withoutOverlapping();
 }
 
 Artisan::command('backtest:run {--pair=*} {--start=} {--end=}', function () {

@@ -1,18 +1,14 @@
 <?php
 
-use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Decision\DTO\DecisionRequest;
+use App\Domain\Decision\LiveDecisionEngine;
 use App\Domain\Execution\PositionLedgerContract;
 use App\Domain\Rules\AlphaRules;
 use App\Support\Clock\ClockInterface;
 
 it('holds when within cooldown after loss', function () {
     $rulesYaml = <<<'YAML'
-gates:
-    news_threshold:
-        deadband: 0.1
-        moderate: 0.3
-        strong: 0.45
+gates: {}
 confluence: {}
 risk: {}
 execution: {}
@@ -64,7 +60,6 @@ YAML;
         'meta' => ['pair_norm' => 'EURUSD', 'data_age_sec' => 10],
         'market' => ['status' => 'TRADEABLE', 'last_price' => 1.1, 'atr5m_pips' => 10, 'spread_estimate_pips' => 0.5],
         'features' => ['trend30m' => 'up'],
-        'news' => ['strength' => 0.5, 'direction' => 'buy'],
         'calendar' => ['within_blackout' => false],
     ];
 

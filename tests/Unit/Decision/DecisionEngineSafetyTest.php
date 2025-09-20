@@ -39,7 +39,6 @@ function makeContext(array $overrides = []): array
     }
 
     $arr['calendar'] = ['within_blackout' => $overrides['within_blackout'] ?? false];
-    $arr['news'] = $overrides['news'] ?? ['strength' => 0.5, 'direction' => 'buy'];
     $arr['meta'] = array_merge($arr['meta'], ['sleeve_balance' => 10000.0]);
 
     return $arr;

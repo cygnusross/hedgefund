@@ -4,10 +4,6 @@ it('reloads rules and shows values', function () {
     $yaml = <<<'YAML'
 gates:
   adx_min: 20
-  news_threshold:
-    strong: 3
-    moderate: 2
-    deadband: 1
 confluence: {}
 risk:
   per_trade_pct:
